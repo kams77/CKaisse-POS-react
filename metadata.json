@@ -1,0 +1,6 @@
+{
+  "name": "CKaisse POS — Caisse Pharmacie & Salon de Coiffure",
+  "description": "Logiciel de caisse (POS) et gestion de stock spécialisé exclusivement pour les Pharmacies / Dépôts Pharmaceutiques et Salons de Coiffure (Haut de Gamme & Simple).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
