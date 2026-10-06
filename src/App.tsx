@@ -54,7 +54,10 @@ import { SalesReportView } from './components/SalesReportView';
 import { CustomersView } from './components/CustomersView';
 import { SaaSBusinessView } from './components/SaaSBusinessView';
 import { FintechProjectView } from './components/FintechProjectView';
-import { TicketingProjectView } from './components/TicketingProjectView';
+import {
+  SubTab,
+  TicketingProjectView,
+} from './components/TicketingProjectView';
 import { PaymentModal } from './components/PaymentModal';
 import { ReceiptModal } from './components/ReceiptModal';
 import { formatMoney } from './utils/format';
@@ -97,8 +100,9 @@ function loadFromStorage<T>(key: string, fallback: T): T {
 }
 
 export default function App() {
-  // Default to Project 1 ('pos') specialized as CKaisse POS
-  const [activeTab, setActiveTab] = useState<ActiveTab>('pos');
+  // Platform focused exclusively on KolaPass (Projet Billetterie & Contrôle d'Accès)
+  const [activeTab, setActiveTab] = useState<ActiveTab>('ticketing');
+  const [ticketingSubTab, setTicketingSubTab] = useState<SubTab>('events');
 
   const [settings, setSettings] = useState<StoreSettings>(() =>
     loadFromStorage(STORAGE_KEYS.settings, INITIAL_SETTINGS)
@@ -1135,78 +1139,64 @@ export default function App() {
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
       {/* Strictly Compliant 3-Zone Top Bar Contract */}
       <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3.5">
-        {/* Zone 1: Single text element wordmark */}
-        <a
-          href="#pos"
-          onClick={(e) => {
-            e.preventDefault();
-            setActiveTab('pos');
-          }}
-          className="text-lg font-bold tracking-tight text-slate-900 whitespace-nowrap"
-        >
-          CKaisse POS
-        </a>
+        {/* Zone 1: Single brand wordmark with KolaPass identity */}
+        <div className="flex items-center gap-2.5">
+          <a
+            href="#ticketing"
+            onClick={(e) => {
+              e.preventDefault();
+              setActiveTab('ticketing');
+              setTicketingSubTab('events');
+            }}
+            className="flex items-center gap-2 text-lg font-bold tracking-tight text-slate-900 whitespace-nowrap"
+          >
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-600 text-white font-mono text-sm shadow-2xs font-bold">
+              KP
+            </span>
+            <span>KolaPass</span>
+          </a>
+          <span className="hidden sm:inline-block rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 border border-emerald-200/60">
+            Billetterie & Portique QR
+          </span>
+        </div>
 
-        {/* Zone 2: 5 clean text navigation links covering all 3 Projects */}
-        <nav className="hidden md:flex items-center gap-6 text-xs font-medium text-slate-600">
-          <button
-            type="button"
-            onClick={() => setActiveTab('pos')}
-            className={`py-1 transition-colors whitespace-nowrap ${
-              activeTab === 'pos'
-                ? 'text-slate-900 font-semibold underline underline-offset-8 decoration-2 decoration-emerald-600'
-                : 'hover:text-slate-900'
-            }`}
-          >
-            Projet 1 : CKaisse POS
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('inventory')}
-            className={`py-1 transition-colors whitespace-nowrap ${
-              activeTab === 'inventory'
-                ? 'text-slate-900 font-semibold underline underline-offset-8 decoration-2 decoration-emerald-600'
-                : 'hover:text-slate-900'
-            }`}
-          >
-            Stocks & Codes-Barres
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('sales')}
-            className={`py-1 transition-colors whitespace-nowrap ${
-              activeTab === 'sales'
-                ? 'text-slate-900 font-semibold underline underline-offset-8 decoration-2 decoration-emerald-600'
-                : 'hover:text-slate-900'
-            }`}
-          >
-            Ventes & Clôture Z
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('fintech')}
-            className={`py-1 transition-colors whitespace-nowrap ${
-              activeTab === 'fintech'
-                ? 'text-slate-900 font-semibold underline underline-offset-8 decoration-2 decoration-emerald-600'
-                : 'hover:text-slate-900'
-            }`}
-          >
-            Projet 2 : KolaPay (API & Liens)
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('ticketing')}
-            className={`py-1 transition-colors whitespace-nowrap ${
-              activeTab === 'ticketing'
-                ? 'text-slate-900 font-semibold underline underline-offset-8 decoration-2 decoration-emerald-600'
-                : 'hover:text-slate-900'
-            }`}
-          >
-            Projet 3 : Billetterie QR
-          </button>
+        {/* Zone 2: Navigation directly controlling the Billetterie sections */}
+        <nav className="hidden md:flex items-center gap-5 text-xs font-medium text-slate-600">
+          {[
+            { id: 'events', label: 'Événements & Vente' },
+            { id: 'scanner', label: 'Portique Caméra', highlight: true },
+            { id: 'passes', label: 'Billets & Pass Émis', count: ticketPasses.length },
+            { id: 'logs', label: 'Journal des Scans', count: accessLogs.length },
+            { id: 'organizers', label: 'Reversements Promoteurs' },
+            { id: 'monetization', label: 'Rentabilité (7%)' },
+          ].map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => {
+                setActiveTab('ticketing');
+                setTicketingSubTab(item.id as SubTab);
+              }}
+              className={`py-1 transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+                activeTab === 'ticketing' && ticketingSubTab === item.id
+                  ? 'text-slate-900 font-semibold underline underline-offset-8 decoration-2 decoration-emerald-600'
+                  : 'hover:text-slate-900'
+              }`}
+            >
+              <span>{item.label}</span>
+              {typeof item.count === 'number' && (
+                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-md bg-slate-100 text-slate-600">
+                  {item.count}
+                </span>
+              )}
+              {item.highlight && ticketingSubTab !== item.id && (
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              )}
+            </button>
+          ))}
         </nav>
 
-        {/* Zone 3: 2 primary actions (Currency selector + Switch Project) */}
+        {/* Zone 3: Currency selector & Quick Scanner Launch */}
         <div className="flex items-center gap-2.5">
           <select
             aria-label="Choisir la devise d'affichage"
@@ -1222,38 +1212,36 @@ export default function App() {
 
           <button
             type="button"
-            onClick={() =>
-              setActiveTab(
-                activeTab === 'pos'
-                  ? 'fintech'
-                  : activeTab === 'fintech'
-                  ? 'ticketing'
-                  : 'pos'
-              )
-            }
-            className="rounded-lg bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white hover:bg-slate-800 transition-colors whitespace-nowrap"
+            onClick={() => {
+              setActiveTab('ticketing');
+              setTicketingSubTab('scanner');
+            }}
+            className="rounded-lg bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-emerald-700 transition-colors whitespace-nowrap shadow-2xs"
           >
-            Changer de Projet
+            Scanner Caméra
           </button>
         </div>
       </header>
 
-      {/* Mobile Navigation Bar */}
+      {/* Mobile Navigation Bar for KolaPass */}
       <div className="flex md:hidden items-center gap-2 overflow-x-auto border-b border-slate-200 bg-white px-4 py-2 text-xs">
         {[
-          { id: 'pos', label: 'P1: CKaisse POS' },
-          { id: 'inventory', label: 'Stocks' },
-          { id: 'sales', label: 'Ventes' },
-          { id: 'fintech', label: 'P2: KolaPay API' },
-          { id: 'ticketing', label: 'P3: Billetterie' },
-          { id: 'saas', label: 'SaaS' },
+          { id: 'events', label: 'Événements' },
+          { id: 'scanner', label: 'Scanner QR' },
+          { id: 'passes', label: `Billets (${ticketPasses.length})` },
+          { id: 'logs', label: `Audit (${accessLogs.length})` },
+          { id: 'organizers', label: 'Reversements' },
+          { id: 'monetization', label: 'Finances' },
         ].map((item) => (
           <button
             key={item.id}
             type="button"
-            onClick={() => setActiveTab(item.id as ActiveTab)}
+            onClick={() => {
+              setActiveTab('ticketing');
+              setTicketingSubTab(item.id as SubTab);
+            }}
             className={`rounded-md px-3 py-1.5 font-medium whitespace-nowrap ${
-              activeTab === item.id
+              activeTab === 'ticketing' && ticketingSubTab === item.id
                 ? 'bg-slate-900 text-white'
                 : 'text-slate-600 hover:bg-slate-100'
             }`}
@@ -1263,52 +1251,28 @@ export default function App() {
         ))}
       </div>
 
-      {/* Sub-header context bar */}
+      {/* Sub-header context bar dedicated to Billetterie & Portique */}
       <div className="border-b border-slate-200 bg-white/70 px-6 py-2.5">
         <div className="mx-auto max-w-[1400px] flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
           <div className="flex items-center gap-2">
             <span className="font-semibold text-slate-900">
-              CKaisse POS : Spécialisé Pharmacie & Salon de Coiffure (VIP & Simple)
+              KolaPass : Billetterie Événementielle & Portique Sécurisé QR
             </span>
             <span aria-hidden="true">·</span>
             <span className="font-mono tabular-nums">
               1 USD = {settings.rates.CDF.toLocaleString('fr-FR')} FC ={' '}
               {settings.rates.XOF.toLocaleString('fr-FR')} FCFA
             </span>
+            <span aria-hidden="true">·</span>
+            <span className="text-emerald-700 font-medium">Commission plateforme : 7,0%</span>
           </div>
 
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={handleRunBimétierTest}
-              className="rounded-md border border-emerald-600 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100 transition-colors"
-            >
-              Test Vente Bimétier (1-clic)
-            </button>
+          <div className="flex items-center gap-3 text-slate-500 font-mono text-[11px]">
+            <span>{events.length} événement(s) actif(s)</span>
             <span>·</span>
-            <button
-              type="button"
-              onClick={() => setActiveTab('customers')}
-              className={`hover:underline ${
-                activeTab === 'customers'
-                  ? 'text-emerald-700 font-semibold'
-                  : 'text-slate-600'
-              }`}
-            >
-              Clients / Patients ({customers.length})
-            </button>
+            <span>{ticketPasses.length} pass émis</span>
             <span>·</span>
-            <button
-              type="button"
-              onClick={() => setActiveTab('saas')}
-              className={`hover:underline ${
-                activeTab === 'saas'
-                  ? 'text-emerald-700 font-semibold'
-                  : 'text-slate-600'
-              }`}
-            >
-              Licences SaaS POS ({tenants.length})
-            </button>
+            <span>{accessLogs.length} scan(s) audité(s)</span>
           </div>
         </div>
       </div>
@@ -1328,6 +1292,8 @@ export default function App() {
             onScanTicketPass={handleScanTicketPass}
             onRequestOrganizerPayout={handleRequestOrganizerPayout}
             onClearAccessLogs={() => setAccessLogs([])}
+            activeSubTab={ticketingSubTab}
+            onSubTabChange={setTicketingSubTab}
           />
         )}
 
@@ -1434,9 +1400,21 @@ export default function App() {
       <footer className="border-t border-slate-200 bg-white px-6 py-4 text-xs text-slate-500">
         <div className="mx-auto max-w-[1400px] flex flex-col sm:flex-row items-center justify-between gap-2">
           <div>
-            CKaisse POS — Caisse & Gestion de Stock Pharmacie & Salon de Coiffure · Projet 2 (KolaPay API) · Projet 3 (KolaPass Billetterie)
+            KolaPass Pro — Billetterie Événementielle Numérique & Portique Sécurisé QR Code · Paiements Mobile Money (M-Pesa, Orange Money, Airtel Money, Wave) & Cartes Bancaires · Commission 7,0%
           </div>
           <div className="flex items-center gap-4">
+            {activeTab !== 'ticketing' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('ticketing');
+                  setTicketingSubTab('events');
+                }}
+                className="font-semibold text-emerald-700 hover:text-emerald-900 underline"
+              >
+                ← Retour à la Billetterie KolaPass
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {

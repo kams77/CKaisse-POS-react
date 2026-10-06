@@ -97,9 +97,17 @@ interface TicketingProjectViewProps {
     destinationAccount: string;
   }) => void;
   onClearAccessLogs: () => void;
+  activeSubTab?: SubTab;
+  onSubTabChange?: (tab: SubTab) => void;
 }
 
-type SubTab = 'events' | 'passes' | 'scanner' | 'logs' | 'organizers' | 'monetization';
+export type SubTab =
+  | 'events'
+  | 'passes'
+  | 'scanner'
+  | 'logs'
+  | 'organizers'
+  | 'monetization';
 type PassViewMode = 'mobile' | 'badge' | 'thermal';
 
 const EVENT_CATEGORIES: EventCategory[] = [
@@ -144,8 +152,15 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
   onScanTicketPass,
   onRequestOrganizerPayout,
   onClearAccessLogs,
+  activeSubTab,
+  onSubTabChange,
 }) => {
-  const [subTab, setSubTab] = useState<SubTab>('events');
+  const [internalSubTab, setInternalSubTab] = useState<SubTab>('events');
+  const subTab = activeSubTab !== undefined ? activeSubTab : internalSubTab;
+  const setSubTab = (tab: SubTab) => {
+    setInternalSubTab(tab);
+    onSubTabChange?.(tab);
+  };
   const [soundEnabled, setSoundEnabled] = useState(true);
 
   // Create Event Modal state
