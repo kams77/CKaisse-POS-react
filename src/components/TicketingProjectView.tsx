@@ -807,9 +807,20 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                   <div className="p-5 space-y-4">
                     <div className="flex items-start justify-between gap-3">
                       <div className="space-y-1 flex-1">
-                        <span className="rounded-md border border-rose-300 bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-800 uppercase tracking-wider">
-                          {ev.category}
-                        </span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="rounded-md border border-rose-300 bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-800 uppercase tracking-wider">
+                            {ev.category}
+                          </span>
+                          {ev.status === 'completed' || new Date(ev.eventDate).getTime() < Date.now() ? (
+                            <span className="rounded-md border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-900 font-mono">
+                              ⏳ Antérieur (Clôturé)
+                            </span>
+                          ) : (
+                            <span className="rounded-md border border-emerald-300 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800 font-mono">
+                              🟢 Disponible
+                            </span>
+                          )}
+                        </div>
                         <h3 className="text-base font-bold text-slate-900 leading-snug mt-1">
                           {ev.title}
                         </h3>
@@ -877,22 +888,33 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                     </div>
 
                     <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setBuyingEvent(ev);
-                          setCheckoutStep('form');
-                          setSelectedTier('Standard');
-                          setTicketQuantity(1);
-                          setBuyerName('');
-                          setBuyerPhone('+243 81 ');
-                          setGuestNames(['']);
-                        }}
-                        className="inline-flex items-center justify-center gap-1.5 rounded-xl border-2 border-rose-600 bg-rose-700 py-2.5 px-3 text-xs font-bold text-white hover:bg-rose-800 transition-colors shadow-2xs"
-                      >
-                        <Ticket className="h-3.5 w-3.5" />
-                        <span>Acheter (M-Pesa)</span>
-                      </button>
+                      {ev.status === 'completed' || new Date(ev.eventDate).getTime() < Date.now() ? (
+                        <button
+                          type="button"
+                          disabled
+                          className="inline-flex items-center justify-center gap-1.5 rounded-xl border-2 border-slate-300 bg-slate-200 py-2.5 px-3 text-xs font-bold text-slate-500 cursor-not-allowed shadow-2xs"
+                        >
+                          <Lock className="h-3.5 w-3.5" />
+                          <span>Clôturé</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setBuyingEvent(ev);
+                            setCheckoutStep('form');
+                            setSelectedTier('Standard');
+                            setTicketQuantity(1);
+                            setBuyerName('');
+                            setBuyerPhone('+243 81 ');
+                            setGuestNames(['']);
+                          }}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-xl border-2 border-rose-600 bg-rose-700 py-2.5 px-3 text-xs font-bold text-white hover:bg-rose-800 transition-colors shadow-2xs"
+                        >
+                          <Ticket className="h-3.5 w-3.5" />
+                          <span>Acheter (M-Pesa)</span>
+                        </button>
+                      )}
 
                       <button
                         type="button"

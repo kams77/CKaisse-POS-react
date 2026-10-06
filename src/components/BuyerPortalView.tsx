@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
+  AlertTriangle,
   ArrowRight,
   BadgeCheck,
   Calendar,
@@ -68,15 +69,63 @@ export const BuyerPortalView: React.FC<BuyerPortalViewProps> = ({
   onPurchasePasses,
   onExitToConsole,
 }) => {
-  // Currently viewed event (defaults to the first concert)
+  // Helper to determine if an event is "antérieur" (completed status or past date)
+  const isEventPast = (ev: TicketingEvent): boolean => {
+    return ev.status === 'completed' || new Date(ev.eventDate).getTime() < Date.now();
+  };
+
+  // Rule: Client / Acheteur has access ONLY to events that are "disponibles" or "antérieurs"
+  // (strictly filter out draft, unapproved or hidden events)
+  const allowedEvents = useMemo(() => {
+    return events.filter(
+      (ev) => ev.status === 'upcoming' || ev.status === 'completed'
+    );
+  }, [events]);
+
+  // Event category filter: 'available' (billetterie ouverte) | 'past' (antérieurs clôturés) | 'all'
+  const [eventFilter, setEventFilter] = useState<'available' | 'past' | 'all'>('available');
+
+  const availableEvents = useMemo(() => {
+    return allowedEvents.filter((ev) => !isEventPast(ev));
+  }, [allowedEvents]);
+
+  const pastEvents = useMemo(() => {
+    return allowedEvents.filter((ev) => isEventPast(ev));
+  }, [allowedEvents]);
+
+  const displayedEvents = useMemo(() => {
+    if (eventFilter === 'available') return availableEvents;
+    if (eventFilter === 'past') return pastEvents;
+    return allowedEvents;
+  }, [eventFilter, availableEvents, pastEvents, allowedEvents]);
+
+  // Currently viewed event
   const [selectedEventId, setSelectedEventId] = useState<string>(
-    events[0]?.id || ''
+    availableEvents[0]?.id || allowedEvents[0]?.id || ''
   );
-  const currentEvent =
-    events.find((e) => e.id === selectedEventId) || events[0];
+
+  const currentEvent = useMemo(() => {
+    const found = displayedEvents.find((e) => e.id === selectedEventId);
+    if (found) return found;
+    return displayedEvents[0] || allowedEvents[0];
+  }, [displayedEvents, selectedEventId, allowedEvents]);
+
+  const isCurrentEventPast = currentEvent ? isEventPast(currentEvent) : false;
 
   // Navigation tab for buyer
   const [buyerTab, setBuyerTab] = useState<'checkout' | 'my_tickets'>('checkout');
+
+  // Tickets Wallet filter: 'all' | 'active' | 'past'
+  const [ticketFilter, setTicketFilter] = useState<'all' | 'active' | 'past'>('all');
+
+  const filteredBuyerPasses = useMemo(() => {
+    return passes.filter((p) => {
+      const isPast = new Date(p.eventDate).getTime() < Date.now() || p.status === 'used';
+      if (ticketFilter === 'active') return !isPast;
+      if (ticketFilter === 'past') return isPast;
+      return true;
+    });
+  }, [passes, ticketFilter]);
 
   // Checkout step
   const [selectedTier, setSelectedTier] = useState<'Standard' | 'VIP' | 'VVIP'>(
@@ -205,79 +254,176 @@ export const BuyerPortalView: React.FC<BuyerPortalViewProps> = ({
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 pb-12">
-      {/* Buyer Simulation Notice Bar */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 rounded-2xl border-2 border-slate-300 bg-slate-100 p-3.5 shadow-2xs">
-        <div className="flex items-center gap-2.5 text-xs text-slate-800">
-          <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-400 bg-slate-800 text-white font-mono text-xs font-bold">
-            👁️
-          </span>
-          <div>
-            <span className="font-extrabold text-slate-900 uppercase tracking-wide">
-              Mode Démo : Écran Utilisateur Public (Acheteur de Billet)
+      {/* Buyer Simulation Notice Bar & Access Rights Rule */}
+      <div className="rounded-2xl border-2 border-sky-300 bg-sky-50/70 p-4 shadow-xs space-y-3">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 text-xs text-slate-800">
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl border-2 border-slate-700 bg-slate-900 text-white font-mono text-xs font-bold shrink-0">
+              👁️
             </span>
-            <p className="text-[11px] text-slate-600">
-              Voici exactement ce que voit un acheteur tiers sur son téléphone ou ordinateur pour réserver son pass et l&apos;afficher le jour J.
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {/* Switch Tab between Buying and My Wallet */}
-          <div className="flex items-center rounded-xl border border-slate-300 bg-white p-1 text-xs">
-            <button
-              type="button"
-              onClick={() => setBuyerTab('checkout')}
-              className={`rounded-lg px-3 py-1 font-bold transition-all ${
-                buyerTab === 'checkout'
-                  ? 'border border-slate-800 bg-slate-800 text-white shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Guichet Billetterie
-            </button>
-            <button
-              type="button"
-              onClick={() => setBuyerTab('my_tickets')}
-              className={`rounded-lg px-3 py-1 font-bold transition-all ${
-                buyerTab === 'my_tickets'
-                  ? 'border border-slate-800 bg-slate-800 text-white shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Mes Billets ({passes.length})
-            </button>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-black text-slate-950 uppercase tracking-wide">
+                  Espace Acheteur Public (Client Tiers)
+                </span>
+                <span className="rounded-md border border-emerald-400 bg-emerald-50 px-2 py-0.2 text-[10px] font-bold text-emerald-800 font-mono">
+                  ACCÈS STRICT
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-600 mt-0.5">
+                Règle légale : Le client n&apos;a le droit de consulter que les <strong>événements disponibles</strong> (ouverts à l&apos;achat) et <strong>antérieurs</strong> (archives et historique de ses pass).
+              </p>
+            </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onExitToConsole}
-            className="rounded-xl border border-rose-300 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-800 hover:bg-rose-100 transition-colors shadow-2xs"
-          >
-            ← Retour Console Admin
-          </button>
+          <div className="flex items-center gap-2 self-end sm:self-auto">
+            {/* Switch Tab between Buying and My Wallet */}
+            <div className="flex items-center rounded-xl border border-slate-300 bg-white p-1 text-xs">
+              <button
+                type="button"
+                onClick={() => setBuyerTab('checkout')}
+                className={`rounded-lg px-3 py-1 font-bold transition-all ${
+                  buyerTab === 'checkout'
+                    ? 'border border-slate-800 bg-slate-800 text-white shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Guichet Billetterie
+              </button>
+              <button
+                type="button"
+                onClick={() => setBuyerTab('my_tickets')}
+                className={`rounded-lg px-3 py-1 font-bold transition-all ${
+                  buyerTab === 'my_tickets'
+                    ? 'border border-slate-800 bg-slate-800 text-white shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Mes Billets ({passes.length})
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={onExitToConsole}
+              className="rounded-xl border border-rose-300 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-800 hover:bg-rose-100 transition-colors shadow-2xs"
+            >
+              ← Console Admin
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* EVENT SELECTOR (IF MULTIPLE EVENTS) */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
-        <span className="font-bold text-slate-500 whitespace-nowrap">À l&apos;affiche :</span>
-        {events.map((ev) => (
-          <button
-            key={ev.id}
-            type="button"
-            onClick={() => {
-              setSelectedEventId(ev.id);
-              setCheckoutStep('form');
-            }}
-            className={`rounded-xl border-2 px-3 py-1.5 font-bold whitespace-nowrap transition-all shadow-2xs ${
-              currentEvent.id === ev.id
-                ? 'border-slate-800 bg-slate-800 text-white'
-                : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
-            }`}
-          >
-            {ev.title}
-          </button>
-        ))}
+      {/* FILTER & EVENT SELECTOR FOR BUYER */}
+      <div className="rounded-2xl border-2 border-slate-200 bg-white p-3.5 space-y-3 shadow-2xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+          <div className="flex items-center gap-1.5 text-xs">
+            <span className="font-extrabold text-slate-800 uppercase tracking-wider text-[11px] mr-1">
+              Filtre Client :
+            </span>
+            <div className="flex items-center rounded-xl border border-slate-300 bg-slate-100 p-1 text-xs">
+              <button
+                type="button"
+                onClick={() => {
+                  setEventFilter('available');
+                  if (availableEvents[0]) {
+                    setSelectedEventId(availableEvents[0].id);
+                    setCheckoutStep('form');
+                  }
+                }}
+                className={`rounded-lg px-2.5 py-1 font-bold transition-all flex items-center gap-1.5 ${
+                  eventFilter === 'available'
+                    ? 'border border-emerald-600 bg-emerald-600 text-white shadow-2xs'
+                    : 'text-slate-700 hover:text-slate-950'
+                }`}
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-300 animate-pulse" />
+                <span>Disponibles ({availableEvents.length})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setEventFilter('past');
+                  if (pastEvents[0]) {
+                    setSelectedEventId(pastEvents[0].id);
+                    setCheckoutStep('form');
+                  }
+                }}
+                className={`rounded-lg px-2.5 py-1 font-bold transition-all flex items-center gap-1.5 ${
+                  eventFilter === 'past'
+                    ? 'border border-amber-600 bg-amber-600 text-white shadow-2xs'
+                    : 'text-slate-700 hover:text-slate-950'
+                }`}
+              >
+                <Clock className="h-3 w-3" />
+                <span>Antérieurs ({pastEvents.length})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setEventFilter('all')}
+                className={`rounded-lg px-2.5 py-1 font-bold transition-all ${
+                  eventFilter === 'all'
+                    ? 'border border-slate-800 bg-slate-800 text-white shadow-2xs'
+                    : 'text-slate-700 hover:text-slate-950'
+                }`}
+              >
+                Tous ({allowedEvents.length})
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 text-[11px] font-mono text-slate-600">
+            {eventFilter === 'available' && (
+              <span className="text-emerald-700 font-bold">● Vente ouverte : sélection et paiement immédiat</span>
+            )}
+            {eventFilter === 'past' && (
+              <span className="text-amber-800 font-bold">● Vente close : consultation archive & historique</span>
+            )}
+            {eventFilter === 'all' && (
+              <span>Affichage des événements disponibles & antérieurs</span>
+            )}
+          </div>
+        </div>
+
+        {/* Event buttons row */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
+          {displayedEvents.map((ev) => {
+            const isPast = isEventPast(ev);
+            const isSelected = currentEvent?.id === ev.id;
+            return (
+              <button
+                key={ev.id}
+                type="button"
+                onClick={() => {
+                  setSelectedEventId(ev.id);
+                  setCheckoutStep('form');
+                }}
+                className={`rounded-xl border-2 px-3 py-1.5 font-bold whitespace-nowrap transition-all shadow-2xs flex items-center gap-1.5 ${
+                  isSelected
+                    ? isPast
+                      ? 'border-amber-600 bg-amber-600 text-white shadow-xs'
+                      : 'border-slate-800 bg-slate-800 text-white shadow-xs'
+                    : isPast
+                    ? 'border-amber-200 bg-amber-50 text-amber-900 hover:border-amber-400'
+                    : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                {isPast ? (
+                  <span className={`rounded-md px-1 text-[10px] font-mono font-bold ${
+                    isSelected ? 'bg-amber-700 text-amber-100' : 'bg-amber-200/70 text-amber-900'
+                  }`}>
+                    Passé
+                  </span>
+                ) : (
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                )}
+                <span>{ev.title}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* TAB 1: BUYER PURCHASE INTERFACE */}
@@ -292,10 +438,17 @@ export const BuyerPortalView: React.FC<BuyerPortalViewProps> = ({
                   <span className="rounded-full border border-white/20 bg-white/10 backdrop-blur-md px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-rose-200">
                     {currentEvent.category}
                   </span>
-                  <span className="rounded-full border border-emerald-400 bg-emerald-500/20 backdrop-blur-md px-2.5 py-0.5 text-[10px] font-bold text-emerald-300 flex items-center gap-1">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    Billetterie Ouverte
-                  </span>
+                  {isCurrentEventPast ? (
+                    <span className="rounded-full border border-amber-300 bg-amber-500/30 backdrop-blur-md px-2.5 py-0.5 text-[10px] font-black text-amber-200 flex items-center gap-1.5">
+                      <Clock className="h-3 w-3 text-amber-300" />
+                      Événement Antérieur (Clôturé)
+                    </span>
+                  ) : (
+                    <span className="rounded-full border border-emerald-400 bg-emerald-500/20 backdrop-blur-md px-2.5 py-0.5 text-[10px] font-bold text-emerald-300 flex items-center gap-1">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      Billetterie Ouverte
+                    </span>
+                  )}
                 </div>
 
                 <div className="space-y-1">
@@ -377,11 +530,72 @@ export const BuyerPortalView: React.FC<BuyerPortalViewProps> = ({
             </div>
           </div>
 
-          {/* Right Column: Interactive Booking & Mobile Money Payment */}
+          {/* Right Column: Interactive Booking & Mobile Money Payment OR Past Event Archive */}
           <div className="lg:col-span-7">
             <div className="rounded-3xl border-2 border-sky-300 bg-white p-6 shadow-md space-y-5">
-              {/* Step 1: Form & Tier Selection */}
-              {checkoutStep === 'form' && (
+              {/* If event is past (antérieur): locked archive consultation */}
+              {isCurrentEventPast ? (
+                <div className="space-y-5 text-xs">
+                  <div className="rounded-2xl border-2 border-amber-400 bg-amber-50 p-4 space-y-2.5">
+                    <div className="flex items-center gap-2 font-black text-amber-950 text-sm">
+                      <AlertTriangle className="h-5 w-5 text-amber-700 shrink-0" />
+                      <span>Billetterie Clôturée — Événement Antérieur</span>
+                    </div>
+                    <p className="text-xs text-amber-900 font-medium leading-relaxed">
+                      Cet événement a eu lieu le <strong>{formatDateTime(currentEvent.eventDate)}</strong>. 
+                      Conformément aux règles de KolaPass, l&apos;acheteur n&apos;a le droit de réserver que pour les événements <strong>disponibles</strong>. 
+                      Pour cet événement antérieur, vous pouvez consulter la fiche et vos billets existants.
+                    </p>
+                    <div className="pt-2 border-t border-amber-200 flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-[11px] font-bold text-amber-800">
+                        Déjà titulaire d&apos;un pass pour cet événement ?
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setBuyerTab('my_tickets');
+                          setTicketFilter('past');
+                        }}
+                        className="rounded-xl border-2 border-amber-700 bg-amber-700 px-3 py-1.5 text-xs font-black text-white hover:bg-amber-800 transition-colors shadow-2xs"
+                      >
+                        Consulter mes billets archivés →
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Archived Pricing Card */}
+                  <div className="rounded-2xl border-2 border-slate-200 bg-slate-50 p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-extrabold text-slate-700 uppercase tracking-wide">
+                        Grille tarifaire clôturée (Historique)
+                      </span>
+                      <span className="font-mono text-[11px] text-slate-500">100% écoulé</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                      {currentEvent.tiers.map((t) => (
+                        <div key={t.id} className="rounded-xl border border-slate-300 bg-white p-3 text-center space-y-1">
+                          <div className="font-extrabold text-xs text-slate-700">{t.name}</div>
+                          <div className="font-mono text-sm font-black text-slate-900">
+                            {formatMoney(t.priceUSD, displayCurrency, settings.rates)}
+                          </div>
+                          <div className="text-[10px] text-amber-800 font-bold bg-amber-100 rounded-md py-0.5">
+                            Clôturé ({t.sold}/{t.capacity})
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Disabled Action Button */}
+                  <button
+                    disabled
+                    className="w-full rounded-2xl border-2 border-slate-300 bg-slate-200 py-3.5 text-xs font-black text-slate-400 cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    <Lock className="h-4 w-4" />
+                    <span>Achat de billet désactivé (Événement antérieur passé)</span>
+                  </button>
+                </div>
+              ) : checkoutStep === 'form' ? (
                 <form onSubmit={handleStartPayment} className="space-y-5 text-xs">
                   <div>
                     <div className="flex items-center justify-between mb-2">
@@ -606,7 +820,7 @@ export const BuyerPortalView: React.FC<BuyerPortalViewProps> = ({
                     <span>Payer {formatMoney(totalUSD, displayCurrency, settings.rates)} par {selectedRail}</span>
                   </button>
                 </form>
-              )}
+              ) : null}
 
               {/* Step 2: USSD Push Phone Prompt Simulation */}
               {checkoutStep === 'ussd_pending' && (
@@ -762,80 +976,154 @@ export const BuyerPortalView: React.FC<BuyerPortalViewProps> = ({
         </div>
       )}
 
-      {/* TAB 2: MY TICKETS WALLET (TOUS LES BILLETS DE L'ACHETEUR) */}
+      {/* TAB 2: MY TICKETS WALLET (PORTFEUILLE BILLETS DISPONIBLES & ANTÉRIEURS) */}
       {buyerTab === 'my_tickets' && (
         <div className="space-y-6">
-          <div className="border-b-2 border-sky-200 pb-3">
-            <h2 className="text-base font-extrabold text-slate-900">
-              Mon Portefeuille de Pass Sécurisés ({passes.length})
-            </h2>
-            <p className="text-xs text-slate-500">
-              Voici vos billets d&apos;entrée pour vos concerts et événements. À présenter au scanner des portiques le jour de l&apos;événement.
-            </p>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b-2 border-sky-200 pb-3">
+            <div>
+              <h2 className="text-base font-extrabold text-slate-900">
+                Mon Portefeuille de Pass Sécurisés ({passes.length})
+              </h2>
+              <p className="text-xs text-slate-500">
+                Vos billets pour les événements <strong>disponibles</strong> (à présenter à l&apos;entrée) et vos pass <strong>antérieurs</strong> (archivés).
+              </p>
+            </div>
+
+            {/* Filter buttons for passes */}
+            <div className="flex items-center rounded-xl border border-slate-300 bg-slate-100 p-1 text-xs">
+              <button
+                type="button"
+                onClick={() => setTicketFilter('all')}
+                className={`rounded-lg px-3 py-1 font-bold transition-all ${
+                  ticketFilter === 'all'
+                    ? 'border border-slate-800 bg-slate-800 text-white shadow-2xs'
+                    : 'text-slate-700 hover:text-slate-900'
+                }`}
+              >
+                Tous ({passes.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setTicketFilter('active')}
+                className={`rounded-lg px-3 py-1 font-bold transition-all flex items-center gap-1.5 ${
+                  ticketFilter === 'active'
+                    ? 'border border-emerald-600 bg-emerald-600 text-white shadow-2xs'
+                    : 'text-slate-700 hover:text-slate-900'
+                }`}
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-300 animate-pulse" />
+                <span>Actifs ({passes.filter((p) => new Date(p.eventDate).getTime() >= Date.now() && p.status !== 'used').length})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setTicketFilter('past')}
+                className={`rounded-lg px-3 py-1 font-bold transition-all flex items-center gap-1.5 ${
+                  ticketFilter === 'past'
+                    ? 'border border-amber-600 bg-amber-600 text-white shadow-2xs'
+                    : 'text-slate-700 hover:text-slate-900'
+                }`}
+              >
+                <Clock className="h-3 w-3" />
+                <span>Antérieurs ({passes.filter((p) => new Date(p.eventDate).getTime() < Date.now() || p.status === 'used').length})</span>
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {passes.map((p) => (
-              <div
-                key={p.id}
-                className="rounded-3xl border-2 border-sky-300 bg-white p-5 shadow-sm space-y-3 flex flex-col justify-between"
-              >
-                <div>
-                  <div className="flex items-center justify-between">
-                    <span className="rounded-md border border-rose-300 bg-rose-50 px-2 py-0.5 font-mono text-[10px] font-bold uppercase text-rose-800">
-                      {p.tierName} PASS
-                    </span>
-                    <span className="font-mono text-xs font-bold text-slate-800">
-                      {p.passCode}
-                    </span>
+            {filteredBuyerPasses.map((p) => {
+              const isPastPass = new Date(p.eventDate).getTime() < Date.now() || p.status === 'used';
+              return (
+                <div
+                  key={p.id}
+                  className={`rounded-3xl border-2 bg-white p-5 shadow-sm space-y-3 flex flex-col justify-between transition-all ${
+                    isPastPass
+                      ? 'border-amber-300 hover:border-amber-400'
+                      : 'border-sky-300 hover:border-sky-400'
+                  }`}
+                >
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <span className="rounded-md border border-rose-300 bg-rose-50 px-2 py-0.5 font-mono text-[10px] font-bold uppercase text-rose-800">
+                          {p.tierName} PASS
+                        </span>
+                        {isPastPass ? (
+                          <span className="rounded-md border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold text-amber-900 flex items-center gap-1">
+                            <Clock className="h-2.5 w-2.5 text-amber-700" />
+                            Antérieur
+                          </span>
+                        ) : (
+                          <span className="rounded-md border border-emerald-300 bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-800 flex items-center gap-1">
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            Actif
+                          </span>
+                        )}
+                      </div>
+                      <span className="font-mono text-xs font-bold text-slate-800">
+                        {p.passCode}
+                      </span>
+                    </div>
+
+                    <h3 className="mt-2 text-sm font-black text-slate-900 leading-snug">
+                      {p.eventTitle}
+                    </h3>
+                    <p className="text-[11px] text-slate-500 flex items-center gap-1 mt-1">
+                      <MapPin className="h-3 w-3 text-rose-600" />
+                      <span>{p.venue}</span>
+                    </p>
+                    <p className="text-[11px] text-slate-500 flex items-center gap-1">
+                      <Clock className="h-3 w-3 text-sky-600" />
+                      <span>{formatDateTime(p.eventDate)}</span>
+                    </p>
                   </div>
 
-                  <h3 className="mt-2 text-sm font-black text-slate-900 leading-snug">
-                    {p.eventTitle}
-                  </h3>
-                  <p className="text-[11px] text-slate-500 flex items-center gap-1 mt-1">
-                    <MapPin className="h-3 w-3 text-rose-600" />
-                    <span>{p.venue}</span>
-                  </p>
-                  <p className="text-[11px] text-slate-500 flex items-center gap-1">
-                    <Clock className="h-3 w-3 text-sky-600" />
-                    <span>{formatDateTime(p.eventDate)}</span>
-                  </p>
-                </div>
+                  {/* QR Miniature */}
+                  <div className={`flex flex-col items-center justify-center rounded-2xl border p-3 ${
+                    isPastPass ? 'border-amber-200 bg-amber-50/40' : 'border-sky-200 bg-sky-50/50'
+                  }`}>
+                    <SvgQrCode value={p.passCode} size={110} />
+                    <span className="mt-1 font-mono text-[10px] text-slate-500">
+                      Titulaire : <strong>{p.holderName}</strong>
+                    </span>
+                    {isPastPass && (
+                      <span className="text-[10px] font-bold text-amber-800 mt-0.5 font-mono">
+                        {p.status === 'used' ? '✓ Entrée Enregistrée (USED)' : '⏳ Événement Terminé (Archivé)'}
+                      </span>
+                    )}
+                  </div>
 
-                {/* QR Miniature */}
-                <div className="flex flex-col items-center justify-center rounded-2xl border border-sky-200 bg-sky-50/50 p-3">
-                  <SvgQrCode value={p.passCode} size={110} />
-                  <span className="mt-1 font-mono text-[10px] text-slate-500">
-                    Titulaire : <strong>{p.holderName}</strong>
-                  </span>
-                </div>
+                  <div className="pt-2 flex items-center justify-between border-t border-sky-100 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleSendToWhatsApp(p)}
+                      className="inline-flex items-center gap-1 rounded-xl border border-emerald-400 bg-emerald-50 px-2.5 py-1.5 text-xs font-bold text-emerald-800 hover:bg-emerald-100"
+                    >
+                      <MessageSquare className="h-3.5 w-3.5" />
+                      <span>WhatsApp</span>
+                    </button>
 
-                <div className="pt-2 flex items-center justify-between border-t border-sky-100 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleSendToWhatsApp(p)}
-                    className="inline-flex items-center gap-1 rounded-xl border border-emerald-400 bg-emerald-50 px-2.5 py-1.5 text-xs font-bold text-emerald-800 hover:bg-emerald-100"
-                  >
-                    <MessageSquare className="h-3.5 w-3.5" />
-                    <span>WhatsApp</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setLatestPass(p);
-                      setBuyerTab('checkout');
-                      setCheckoutStep('success');
-                    }}
-                    className="rounded-xl border-2 border-slate-800 bg-slate-800 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-900"
-                  >
-                    Pass Plein Écran →
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLatestPass(p);
+                        setBuyerTab('checkout');
+                        setCheckoutStep('success');
+                      }}
+                      className="rounded-xl border-2 border-slate-800 bg-slate-800 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-900"
+                    >
+                      Pass Plein Écran →
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
+
+          {filteredBuyerPasses.length === 0 && (
+            <div className="rounded-2xl border-2 border-dashed border-slate-300 p-8 text-center text-xs text-slate-500">
+              Aucun billet trouvé pour ce filtre ({ticketFilter}).
+            </div>
+          )}
         </div>
       )}
     </div>
