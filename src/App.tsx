@@ -1279,6 +1279,7 @@ export default function App() {
             { id: 'logs', label: 'Journal des Scans', count: accessLogs.length },
             { id: 'organizers', label: 'Reversements' },
             { id: 'monetization', label: 'Rentabilité (7%)' },
+            { id: 'buyer', label: '👁️ Démo Acheteur', highlight: true },
           ].map((item) => {
             const isActive = activeTab === 'ticketing' && ticketingSubTab === item.id;
             return (
@@ -1316,18 +1317,33 @@ export default function App() {
         </nav>
 
         {/* Zone 3: Currency selector & Quick Scanner Launch & Role Badge */}
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2">
           <select
             aria-label="Choisir la devise d'affichage"
             value={displayCurrency}
             onChange={(e) => setDisplayCurrency(e.target.value as CurrencyCode)}
-            className="rounded-lg border-2 border-slate-300 bg-slate-100 px-3 py-1.5 text-xs font-mono font-bold text-slate-800 focus:border-slate-700 focus:outline-none"
+            className="rounded-lg border-2 border-slate-300 bg-slate-100 px-2.5 py-1.5 text-xs font-mono font-bold text-slate-800 focus:border-slate-700 focus:outline-none"
           >
             <option value="USD">USD ($)</option>
             <option value="CDF">CDF (FC)</option>
             <option value="XOF">XOF (FCFA)</option>
             <option value="EUR">EUR (€)</option>
           </select>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('ticketing');
+              setTicketingSubTab('buyer');
+            }}
+            className={`rounded-lg border-2 px-3 py-1.5 text-xs font-bold transition-all whitespace-nowrap shadow-xs ${
+              activeTab === 'ticketing' && ticketingSubTab === 'buyer'
+                ? 'border-rose-600 bg-rose-700 text-white'
+                : 'border-slate-300 bg-white text-slate-800 hover:border-slate-800 hover:bg-slate-50'
+            }`}
+          >
+            👁️ Vue Acheteur
+          </button>
 
           <button
             type="button"
@@ -1346,6 +1362,7 @@ export default function App() {
       <div className="flex lg:hidden items-center gap-1.5 overflow-x-auto border-b-2 border-slate-300 bg-slate-100 p-2 text-xs">
         {[
           { id: 'events', label: 'Événements' },
+          { id: 'buyer', label: '👁️ Démo Acheteur' },
           { id: 'scanner', label: 'Scanner QR' },
           { id: 'passes', label: `Billets (${ticketPasses.length})` },
           { id: 'logs', label: `Audit (${accessLogs.length})` },

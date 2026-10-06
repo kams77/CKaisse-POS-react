@@ -15,6 +15,7 @@ import {
   CreditCard,
   Download,
   ExternalLink,
+  Eye,
   Flame,
   KeyRound,
   Layers,
@@ -69,6 +70,7 @@ import {
 import { SvgQrCode } from './SvgQrCode';
 import { AuthRoleModal } from './AuthRoleModal';
 import { TicketPassDetailModal } from './TicketPassDetailModal';
+import { BuyerPortalView } from './BuyerPortalView';
 import { INITIAL_USER_SESSIONS } from '../data/initialData';
 
 export type SubTab =
@@ -77,7 +79,8 @@ export type SubTab =
   | 'scanner'
   | 'logs'
   | 'organizers'
-  | 'monetization';
+  | 'monetization'
+  | 'buyer';
 
 interface TicketingProjectViewProps {
   events: TicketingEvent[];
@@ -669,6 +672,7 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
             { id: 'logs', label: '4. Journal des Scans (Audit)', count: accessLogs.length },
             { id: 'organizers', label: '5. Reversements Promoteurs' },
             { id: 'monetization', label: '6. Rentabilité (7%)' },
+            { id: 'buyer', label: '7. 👁️ Démo Acheteur Public', highlight: true },
           ].map((tab) => {
             const isActive = subTab === tab.id;
             return (
@@ -904,6 +908,15 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                         <span>Virement 93%</span>
                       </button>
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setSubTab('buyer')}
+                      className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl border-2 border-slate-300 bg-white py-2 px-3 text-xs font-bold text-slate-700 hover:border-slate-800 hover:bg-slate-100 transition-colors shadow-2xs"
+                    >
+                      <Eye className="h-3.5 w-3.5 text-slate-600" />
+                      <span>👁️ Démo : Voir l&apos;écran d&apos;un Acheteur Tiers</span>
+                    </button>
                   </div>
                 </div>
               );
@@ -1560,6 +1573,18 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* SUBTAB 7: DÉMO ÉCRAN ACHETEUR TIERS / PORTAIL PUBLIC */}
+      {subTab === 'buyer' && (
+        <BuyerPortalView
+          events={events}
+          passes={passes}
+          displayCurrency={displayCurrency}
+          settings={settings}
+          onPurchasePasses={onPurchaseTicketPasses}
+          onExitToConsole={() => setSubTab('events')}
+        />
       )}
 
       {/* MODAL 1: AUTH & ROLES (ADMIN / ORGANISATEUR / AGENT) WITH 2FA SMS */}
