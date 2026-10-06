@@ -755,7 +755,7 @@ export const INITIAL_EVENTS: TicketingEvent[] = [
     venue: 'Pullman Grand Hôtel — Salle Congo',
     city: 'Kinshasa',
     eventDate: '2026-10-24T09:00:00Z',
-    commissionRatePercent: 7.0,
+    commissionRatePercent: 10.0,
     status: 'upcoming',
     createdAt: '2026-09-15T10:00:00Z',
     tiers: [
@@ -774,7 +774,7 @@ export const INITIAL_EVENTS: TicketingEvent[] = [
     venue: 'Esplanade du Palais du Peuple',
     city: 'Kinshasa',
     eventDate: '2026-11-07T18:30:00Z',
-    commissionRatePercent: 7.0,
+    commissionRatePercent: 10.0,
     status: 'upcoming',
     createdAt: '2026-09-20T14:00:00Z',
     tiers: [
@@ -793,7 +793,7 @@ export const INITIAL_EVENTS: TicketingEvent[] = [
     venue: 'Centre des Affaires Silikin Village',
     city: 'Kinshasa - Gombe',
     eventDate: '2026-10-18T10:00:00Z',
-    commissionRatePercent: 7.0,
+    commissionRatePercent: 10.0,
     status: 'upcoming',
     createdAt: '2026-09-25T09:00:00Z',
     tiers: [
@@ -812,7 +812,7 @@ export const INITIAL_EVENTS: TicketingEvent[] = [
     venue: 'Stade Vélodrome de Kintambo',
     city: 'Kinshasa',
     eventDate: '2026-08-15T16:00:00Z',
-    commissionRatePercent: 7.0,
+    commissionRatePercent: 10.0,
     status: 'completed',
     createdAt: '2026-07-10T10:00:00Z',
     tiers: [
@@ -831,7 +831,7 @@ export const INITIAL_EVENTS: TicketingEvent[] = [
     venue: 'Hôtel Béatrice — Salon Congo',
     city: 'Kinshasa - Gombe',
     eventDate: '2026-09-05T09:30:00Z',
-    commissionRatePercent: 7.0,
+    commissionRatePercent: 10.0,
     status: 'completed',
     createdAt: '2026-08-01T08:00:00Z',
     tiers: [

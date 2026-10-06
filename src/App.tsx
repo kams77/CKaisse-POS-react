@@ -862,6 +862,7 @@ export default function App() {
     vipCap: number;
     vvipPriceUSD: number;
     vvipCap: number;
+    commissionRatePercent?: number;
   }): TicketingEvent => {
     const nextNum = (events.length + 1).toString().padStart(2, '0');
     const created: TicketingEvent = {
@@ -874,7 +875,10 @@ export default function App() {
       venue: data.venue,
       city: data.city,
       eventDate: data.eventDate,
-      commissionRatePercent: 7.0,
+      commissionRatePercent:
+        data.commissionRatePercent !== undefined && !isNaN(data.commissionRatePercent)
+          ? data.commissionRatePercent
+          : 10.0,
       status: 'upcoming',
       createdAt: new Date().toISOString(),
       tiers: [
@@ -1278,7 +1282,7 @@ export default function App() {
             { id: 'passes', label: 'Billets & Pass', count: ticketPasses.length },
             { id: 'logs', label: 'Journal des Scans', count: accessLogs.length },
             { id: 'organizers', label: 'Reversements' },
-            { id: 'monetization', label: 'Rentabilité (7%)' },
+            { id: 'monetization', label: 'Rentabilité (10%)' },
             { id: 'buyer', label: '👁️ Démo Acheteur', highlight: true },
           ].map((item) => {
             const isActive = activeTab === 'ticketing' && ticketingSubTab === item.id;
@@ -1403,7 +1407,7 @@ export default function App() {
               {settings.rates.XOF.toLocaleString('fr-FR')} FCFA
             </span>
             <span aria-hidden="true">·</span>
-            <span className="text-rose-800 font-bold">Commission : 7,0%</span>
+            <span className="text-rose-800 font-bold">Commission par défaut : 10,0%</span>
           </div>
 
           <div className="flex items-center gap-3 text-slate-600 font-mono text-[11px] font-semibold">

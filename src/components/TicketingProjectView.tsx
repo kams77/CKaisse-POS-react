@@ -103,6 +103,7 @@ interface TicketingProjectViewProps {
     vipCap: number;
     vvipPriceUSD: number;
     vvipCap: number;
+    commissionRatePercent?: number;
   }) => TicketingEvent;
   onPurchaseTicketPasses: (payload: {
     eventId: string;
@@ -219,6 +220,8 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
   const [vipCap, setVipCap] = useState('120');
   const [vvipPrice, setVvipPrice] = useState('120');
   const [vvipCap, setVvipCap] = useState('30');
+  const [evtCommissionType, setEvtCommissionType] = useState<'default' | 'custom'>('default');
+  const [evtCustomCommission, setEvtCustomCommission] = useState('10.0');
 
   // Purchase Modal with Mobile Money processing state
   const [buyingEvent, setBuyingEvent] = useState<TicketingEvent | null>(null);
@@ -272,15 +275,18 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
   const metrics = useMemo(() => {
     let totalTicketsSold = 0;
     let totalGrossUSD = 0;
+    let totalCommissionUSD = 0;
 
     for (const ev of events) {
+      const rate = typeof ev.commissionRatePercent === 'number' ? ev.commissionRatePercent : 10.0;
       for (const tier of ev.tiers) {
         totalTicketsSold += tier.sold;
-        totalGrossUSD += tier.sold * tier.priceUSD;
+        const tierGross = tier.sold * tier.priceUSD;
+        totalGrossUSD += tierGross;
+        totalCommissionUSD += tierGross * (rate / 100);
       }
     }
 
-    const totalCommissionUSD = totalGrossUSD * 0.07;
     const checkedInPassesCount = passes.filter((p) => p.status === 'used').length;
     const blacklistedPassesCount = passes.filter((p) => p.status === 'blacklisted').length;
     const totalOrganizerPayoutsUSD = organizerPayouts.reduce((acc, p) => acc + p.amountUSD, 0);
@@ -299,6 +305,12 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
   const handleCreateEventSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!evtTitle.trim() || !evtVenue.trim()) return;
+
+    const chosenCommission =
+      evtCommissionType === 'default'
+        ? 10.0
+        : Math.max(0, Math.min(50, parseFloat(evtCustomCommission) || 10.0));
+
     onCreateEvent({
       title: evtTitle.trim(),
       category: evtCategory,
@@ -313,9 +325,12 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
       vipCap: Math.max(1, parseInt(vipCap, 10) || 50),
       vvipPriceUSD: Math.max(1, parseFloat(vvipPrice) || 100),
       vvipCap: Math.max(1, parseInt(vvipCap, 10) || 15),
+      commissionRatePercent: chosenCommission,
     });
     setEvtTitle('');
     setEvtVenue('');
+    setEvtCommissionType('default');
+    setEvtCustomCommission('10.0');
     setIsCreateEventOpen(false);
   };
 
@@ -671,7 +686,7 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
             { id: 'passes', label: '3. Billets & Pass Émis', count: passes.length },
             { id: 'logs', label: '4. Journal des Scans (Audit)', count: accessLogs.length },
             { id: 'organizers', label: '5. Reversements Promoteurs' },
-            { id: 'monetization', label: '6. Rentabilité (7%)' },
+            { id: 'monetization', label: '6. Rentabilité (10%)' },
             { id: 'buyer', label: '7. 👁️ Démo Acheteur Public', highlight: true },
           ].map((tab) => {
             const isActive = subTab === tab.id;
@@ -721,7 +736,7 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
 
         <div className="rounded-2xl border-2 border-rose-300 bg-white p-5 shadow-xs">
           <span className="text-xs font-bold uppercase tracking-wider text-rose-800">
-            Commission KolaPass (7,0%)
+            Commission KolaPass (10,0% par défaut)
           </span>
           <div className="mt-1 text-2xl font-black text-rose-700 font-mono tabular-nums">
             +{formatMoney(metrics.totalCommissionUSD, displayCurrency, settings.rates)}
@@ -927,7 +942,7 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                         className="inline-flex items-center justify-center gap-1.5 rounded-xl border-2 border-sky-300 bg-white py-2.5 px-3 text-xs font-bold text-sky-950 hover:bg-sky-50 transition-colors"
                       >
                         <Wallet className="h-3.5 w-3.5 text-sky-700" />
-                        <span>Virement 93%</span>
+                        <span>Virement {(100 - (ev.commissionRatePercent || 10.0)).toFixed(0)}%</span>
                       </button>
                     </div>
 
@@ -1498,7 +1513,7 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
         </div>
       )}
 
-      {/* SUBTAB 5: ORGANIZER PAYOUTS (REVERSEMENTS 93%) */}
+      {/* SUBTAB 5: ORGANIZER PAYOUTS (REVERSEMENTS PROMOTEURS) */}
       {subTab === 'organizers' && (
         <div className="rounded-2xl border-2 border-sky-300 bg-white p-5 shadow-xs space-y-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b-2 border-sky-100 pb-3">
@@ -1507,7 +1522,7 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                 Reversements Financiers Promoteurs & Organisateurs
               </h2>
               <p className="text-xs text-slate-500">
-                Ordres de virement automatisés vers M-Pesa, Orange Money, Airtel Money, Wave ou Banque après retenue de la commission 7,0%.
+                Ordres de virement automatisés vers M-Pesa, Orange Money, Airtel Money, Wave ou Banque après retenue de la commission plateforme (10,0% par défaut ou personnalisée).
               </p>
             </div>
           </div>
@@ -1556,10 +1571,10 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
         <div className="rounded-2xl border-2 border-sky-300 bg-white p-6 shadow-xs space-y-6">
           <div className="border-b-2 border-sky-100 pb-4">
             <h2 className="text-base font-extrabold text-slate-900">
-              Modèle Économique & Rentabilité KolaPass (Commission 7%)
+              Modèle Économique & Rentabilité KolaPass (Commission par Défaut : 10%)
             </h2>
             <p className="text-xs text-slate-500">
-              Chaque billet émis génère instantanément 7,0% de marge brute directement prélevée lors de la transaction Mobile Money.
+              Chaque billet émis génère par défaut 10,0% de marge brute (configurable librement lors de la création de chaque événement) directement prélevée lors de la transaction Mobile Money.
             </p>
           </div>
 
@@ -1568,9 +1583,9 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
               <span className="text-xs font-bold uppercase tracking-wider text-sky-800">
                 Commission Plateforme
               </span>
-              <div className="mt-1 text-2xl font-black text-slate-900">7,0 %</div>
+              <div className="mt-1 text-2xl font-black text-slate-900">10,0 %</div>
               <p className="mt-1 text-xs text-slate-500">
-                0 frais caché. Aucun coût d&apos;installation de matériel pour l&apos;organisateur.
+                Taux par défaut appliqué aux nouveaux événements (ajustable à la création).
               </p>
             </div>
 
@@ -1578,7 +1593,7 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
               <span className="text-xs font-bold uppercase tracking-wider text-rose-800">
                 Reversement Promoteur
               </span>
-              <div className="mt-1 text-2xl font-black text-rose-900">93,0 %</div>
+              <div className="mt-1 text-2xl font-black text-rose-900">90,0 %</div>
               <p className="mt-1 text-xs text-slate-500">
                 Versé dès la fin de l&apos;événement sur M-Pesa ou compte bancaire sous 24h.
               </p>
@@ -1792,6 +1807,106 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                         className="w-1/2 rounded-lg border border-sky-300 bg-white p-1 text-center font-mono"
                       />
                     </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Configuration du Taux de Commission KolaPass (Par défaut 10%) */}
+              <div className="rounded-xl border-2 border-rose-200 bg-rose-50/60 p-3.5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-900 uppercase text-[11px] flex items-center gap-1.5">
+                    <Coins className="h-4 w-4 text-rose-700" />
+                    <span>Commission Plateforme KolaPass</span>
+                  </span>
+                  <span className="text-[10px] font-mono font-bold text-rose-800 bg-rose-100 border border-rose-300 px-2 py-0.5 rounded-md">
+                    Par défaut : 10,0%
+                  </span>
+                </div>
+
+                <div className="space-y-2.5">
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEvtCommissionType('default');
+                        setEvtCustomCommission('10.0');
+                      }}
+                      className={`rounded-xl border-2 p-2.5 text-left transition-all ${
+                        evtCommissionType === 'default'
+                          ? 'border-rose-600 bg-rose-100/70 text-rose-950 font-bold ring-1 ring-rose-500 shadow-2xs'
+                          : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="font-extrabold text-xs">Standard Défaut (10%)</div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">
+                        Taux officiel par défaut de la plateforme
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setEvtCommissionType('custom')}
+                      className={`rounded-xl border-2 p-2.5 text-left transition-all ${
+                        evtCommissionType === 'custom'
+                          ? 'border-rose-600 bg-rose-100/70 text-rose-950 font-bold ring-1 ring-rose-500 shadow-2xs'
+                          : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="font-extrabold text-xs">Taux Négocié (%)</div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">
+                        Commission personnalisée pour ce concert
+                      </div>
+                    </button>
+                  </div>
+
+                  {evtCommissionType === 'custom' && (
+                    <div className="rounded-xl border border-rose-200 bg-white p-3 space-y-2 animate-in fade-in">
+                      <div className="flex items-center justify-between gap-3">
+                        <label className="text-[11px] font-bold text-slate-800">
+                          Pourcentage prélevé par KolaPass :
+                        </label>
+                        <div className="flex items-center">
+                          <input
+                            type="number"
+                            min="0"
+                            max="50"
+                            step="0.5"
+                            value={evtCustomCommission}
+                            onChange={(e) => setEvtCustomCommission(e.target.value)}
+                            className="w-20 rounded-lg border-2 border-rose-300 bg-white p-1 text-center font-mono font-bold text-slate-900 focus:outline-none"
+                          />
+                          <span className="ml-1.5 font-bold text-slate-700">%</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 pt-1 text-[10px]">
+                        <span className="text-slate-500 font-medium">Préréglages :</span>
+                        {['5.0', '8.0', '10.0', '12.0', '15.0'].map((rate) => (
+                          <button
+                            key={rate}
+                            type="button"
+                            onClick={() => setEvtCustomCommission(rate)}
+                            className={`rounded px-1.5 py-0.5 border font-mono font-bold transition-colors ${
+                              evtCustomCommission === rate
+                                ? 'bg-rose-700 text-white border-rose-700'
+                                : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
+                            }`}
+                          >
+                            {rate}%
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Real-time split preview */}
+                  <div className="flex items-center justify-between rounded-lg bg-white/80 p-2 text-[11px] font-mono border border-rose-200/80">
+                    <span className="text-rose-900 font-bold">
+                      Part KolaPass : {evtCommissionType === 'default' ? '10.0' : evtCustomCommission}%
+                    </span>
+                    <span className="text-emerald-800 font-bold">
+                      Part Promoteur : {(100 - (evtCommissionType === 'default' ? 10.0 : (parseFloat(evtCustomCommission) || 10.0))).toFixed(1)}%
+                    </span>
                   </div>
                 </div>
               </div>
