@@ -1,0 +1,17 @@
+# KolaPass — déploiement (Synology Container Manager, ou tout serveur avec Docker).
+# 1. Remplacez SETUP_CODE par un code secret à vous.
+# 2. Lancez : docker compose up -d --build
+# 3. Ouvrez http://IP-DU-SERVEUR:3000 et créez le compte administrateur avec ce code.
+services:
+  kolapass:
+    build: .
+    image: kolapass:latest
+    container_name: kolapass
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      SETUP_CODE: "CHANGEZ_MOI"      # code demandé une seule fois, à la création du compte administrateur
+      COOKIE_SECURE: "false"         # mettre "true" si le site est servi en HTTPS (reverse proxy)
+    volumes:
+      - ./data:/data                 # fichier de données + copies de sécurité quotidiennes

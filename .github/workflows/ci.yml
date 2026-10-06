@@ -1,0 +1,38 @@
+name: CI
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-et-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Installation
+        run: npm install --no-audit --no-fund
+      - name: Vérification TypeScript (informative)
+        run: npm run lint
+        continue-on-error: true
+      - name: Compilation de l'application
+        run: npm run build
+      - name: Tests de l'API (serveur de production, base vierge)
+        run: |
+          NODE_ENV=production SETUP_CODE=code-ci PORT=3100 DATA_DIR=/tmp/kp-ci node server/index.mjs &
+          for i in $(seq 1 20); do curl -fs http://localhost:3100/api/health && break; sleep 0.5; done
+          BASE_URL=http://localhost:3100 SETUP_CODE=code-ci node server/tests/api.test.mjs
+          curl -fsS http://localhost:3100/ | grep -q '<div id="root">'
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image Docker et démarrage
+        run: |
+          docker build -t kolapass:ci .
+          docker run -d --name kp -p 3200:3000 -e SETUP_CODE=code-docker kolapass:ci
+          for i in $(seq 1 30); do curl -fs http://localhost:3200/api/health && break; sleep 1; done
+          curl -fsS http://localhost:3200/api/public/status | grep -q '"initialized":false'
+          docker logs kp
