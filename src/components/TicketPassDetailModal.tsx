@@ -25,8 +25,7 @@ import {
 } from 'lucide-react';
 import { CurrencyCode, EventTicketPass, StoreSettings, UserRole } from '../types';
 import { SvgQrCode } from './SvgQrCode';
-import { getDynamicQrToken } from '../utils/cryptoJwt';
-import { formatDateTime, formatMoney } from '../utils/format';
+import { formatDateTime, formatMoney, initialsAvatar } from '../utils/format';
 
 interface TicketPassDetailModalProps {
   pass: EventTicketPass | null;
@@ -48,26 +47,9 @@ export const TicketPassDetailModal: React.FC<TicketPassDetailModalProps> = ({
   onReactivatePass,
 }) => {
   const [viewMode, setViewMode] = useState<'mobile' | 'badge' | 'thermal' | 'jwt'>('mobile');
-  const [secondsRemaining, setSecondsRemaining] = useState(30);
-  const [dynamicToken, setDynamicToken] = useState('');
   const [blacklistInput, setBlacklistInput] = useState('');
   const [showBlacklistConfirm, setShowBlacklistConfirm] = useState(false);
   const [notificationStatus, setNotificationStatus] = useState<string | null>(null);
-
-  // 30-second rolling dynamic QR timer
-  useEffect(() => {
-    if (!pass) return;
-
-    const updateToken = () => {
-      const { dynamicCode, secondsRemaining: sec } = getDynamicQrToken(pass.passCode, 30);
-      setDynamicToken(dynamicCode);
-      setSecondsRemaining(sec);
-    };
-
-    updateToken();
-    const interval = setInterval(updateToken, 1000);
-    return () => clearInterval(interval);
-  }, [pass]);
 
   if (!pass) return null;
 
@@ -82,7 +64,7 @@ export const TicketPassDetailModal: React.FC<TicketPassDetailModalProps> = ({
       `*Titulaire* : ${pass.holderName}\n` +
       `*Lieu* : ${pass.venue}\n` +
       `*Statut* : ${pass.status === 'valid' ? 'VALIDE (Non utilisé)' : pass.status}\n\n` +
-      `Présentez votre QR Code dynamique anti-capture à l'entrée du stade/salle.\n` +
+      `Présentez ce billet (code ${pass.passCode}) à l'entrée : une seule entrée possible.\n` +
       `Signature cryptographique : ${pass.qrSignature || 'HMAC-SHA256'}\n\n` +
       `_KolaPass Billetterie & Contrôle d'Accès Sécurisé_`
     );
@@ -128,7 +110,7 @@ export const TicketPassDetailModal: React.FC<TicketPassDetailModalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-500">
-                Billet cryptographique avec signature HMAC & QR dynamique anti-capture
+                Billet à QR code signé (HMAC-SHA256) : une seule entrée possible
               </p>
             </div>
           </div>
@@ -251,32 +233,13 @@ export const TicketPassDetailModal: React.FC<TicketPassDetailModalProps> = ({
 
               {/* Anti-Screenshot Dynamic QR Code Area */}
               <div className="relative mt-4 flex flex-col items-center justify-center rounded-2xl border-2 border-sky-200 bg-white p-4 shadow-inner">
-                {/* Rolling Timer Bar */}
-                <div className="w-full flex items-center justify-between text-[11px] font-mono text-slate-500 pb-2">
-                  <span className="flex items-center gap-1 text-sky-700 font-bold">
-                    <Sparkles className="h-3 w-3 text-amber-500" />
-                    <span>QR DYNAMIQUE</span>
-                  </span>
-                  <span className="text-rose-700 font-bold">
-                    Expire dans {secondsRemaining}s
-                  </span>
-                </div>
-                <div className="w-full h-1 bg-slate-100 rounded-full overflow-hidden mb-3">
-                  <div
-                    className="h-full bg-rose-600 transition-all duration-1000 ease-linear"
-                    style={{ width: `${(secondsRemaining / 30) * 100}%` }}
-                  />
+                <div className="w-full pb-2 text-center text-[11px] font-mono font-bold text-sky-700">
+                  QR SIGNÉ — VÉRIFIÉ PAR LE SERVEUR AU PORTIQUE · USAGE UNIQUE
                 </div>
 
                 {/* QR Code Graphic */}
                 <div className="relative p-2 rounded-xl bg-white border border-slate-200">
-                  <SvgQrCode value={dynamicToken || pass.passCode} size={180} />
-                  {/* Holographic Watermark Badge */}
-                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <div className="rounded-full bg-white/90 border border-sky-300 p-1.5 shadow-xs">
-                      <ShieldCheck className="h-5 w-5 text-sky-700" />
-                    </div>
-                  </div>
+                  <SvgQrCode value={pass.qrPayload || pass.passCode} size={200} />
                 </div>
 
                 {/* Anti-Screenshot Watermark Footer */}
@@ -285,10 +248,8 @@ export const TicketPassDetailModal: React.FC<TicketPassDetailModalProps> = ({
                     {pass.passCode}
                   </div>
                   <div className="mt-1 text-[10px] text-slate-500 flex items-center justify-center gap-1">
-                    <span>Filigrane sécurisé :</span>
+                    <span>Titulaire :</span>
                     <strong className="text-slate-800">{pass.holderName}</strong>
-                    <span>·</span>
-                    <span className="font-mono">{new Date().toLocaleTimeString('fr-FR')}</span>
                   </div>
                 </div>
               </div>
@@ -297,8 +258,7 @@ export const TicketPassDetailModal: React.FC<TicketPassDetailModalProps> = ({
               <div className="mt-4 flex items-center gap-3 rounded-xl border border-sky-200 bg-white p-3">
                 <img
                   src={
-                    pass.avatarUrl ||
-                    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'
+                    pass.avatarUrl || initialsAvatar(pass.holderName)
                   }
                   alt={pass.holderName}
                   className="h-12 w-12 rounded-full border-2 border-sky-300 object-cover"
@@ -327,8 +287,7 @@ export const TicketPassDetailModal: React.FC<TicketPassDetailModalProps> = ({
               <div className="mt-4">
                 <img
                   src={
-                    pass.avatarUrl ||
-                    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'
+                    pass.avatarUrl || initialsAvatar(pass.holderName)
                   }
                   alt={pass.holderName}
                   className="mx-auto h-24 w-24 rounded-full border-4 border-slate-900 object-cover shadow-sm"
@@ -342,7 +301,7 @@ export const TicketPassDetailModal: React.FC<TicketPassDetailModalProps> = ({
               </div>
 
               <div className="mt-4 flex justify-center">
-                <SvgQrCode value={pass.passCode} size={130} />
+                <SvgQrCode value={pass.qrPayload || pass.passCode} size={130} />
               </div>
               <div className="mt-3 font-mono text-xs font-bold text-slate-800">
                 {pass.passCode}
@@ -391,7 +350,7 @@ export const TicketPassDetailModal: React.FC<TicketPassDetailModalProps> = ({
               </div>
 
               <div className="pt-3 flex flex-col items-center">
-                <SvgQrCode value={pass.passCode} size={110} />
+                <SvgQrCode value={pass.qrPayload || pass.passCode} size={110} />
                 <div className="mt-2 text-[10px] text-center text-slate-500">
                   SCAN UNIQUE À L&apos;ENTRÉE · NON REMBOURSABLE
                 </div>

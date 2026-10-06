@@ -7,3 +7,4 @@ coverage/
 *.tar.gz
 .env*
 !.env.example
+data/

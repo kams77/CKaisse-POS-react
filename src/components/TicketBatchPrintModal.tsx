@@ -250,7 +250,7 @@ export const TicketBatchPrintModal: React.FC<TicketBatchPrintModalProps> = ({
 
                       {/* Crisp Scannable QR Code */}
                       <div className="bg-white p-1 rounded-xl border border-slate-300 shadow-2xs">
-                        <SvgQrCode value={pass.passCode} size={92} />
+                        <SvgQrCode value={pass.qrPayload || pass.passCode} size={92} />
                       </div>
 
                       <div className="font-mono font-black text-xs text-rose-800 mt-1">

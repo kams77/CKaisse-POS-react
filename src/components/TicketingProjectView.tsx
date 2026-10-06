@@ -66,14 +66,13 @@ import {
   UserRole,
   UserSession,
 } from '../types';
-import { formatDateTime, formatMoney } from '../utils/format';
+import { formatDateTime, formatMoney, initialsAvatar } from '../utils/format';
 import {
   playAlertBuzzer,
   playBlacklistAlarm,
   playSuccessChime,
 } from '../utils/audioAlerts';
 import { SvgQrCode } from './SvgQrCode';
-import { AuthRoleModal } from './AuthRoleModal';
 import { TicketPassDetailModal } from './TicketPassDetailModal';
 import { BuyerPortalView } from './BuyerPortalView';
 import { TicketBatchModal } from './TicketBatchModal';
@@ -113,7 +112,8 @@ interface TicketingProjectViewProps {
     vvipPriceUSD: number;
     vvipCap: number;
     commissionRatePercent?: number;
-  }) => TicketingEvent;
+    ownerId?: string;
+  }) => TicketingEvent | Promise<TicketingEvent>;
   onPurchaseTicketPasses: (payload: {
     eventId: string;
     tierName: 'Standard' | 'VIP' | 'VVIP';
@@ -122,8 +122,9 @@ interface TicketingProjectViewProps {
     paymentRail: FintechRail;
     quantity?: number;
     discountPercent?: number;
+    promoCode?: string;
     guestNames?: string[];
-  }) => EventTicketPass[];
+  }) => EventTicketPass[] | Promise<EventTicketPass[]>;
   onGenerateBatch?: (payload: {
     eventId: string;
     tierName: 'Standard' | 'VIP' | 'VVIP';
@@ -136,31 +137,63 @@ interface TicketingProjectViewProps {
     distributorName?: string;
     distributorPhone?: string;
     notes?: string;
-  }) => { batch: TicketBatchRange; passes: EventTicketPass[] };
+  }) => { batch: TicketBatchRange; passes: EventTicketPass[] } | Promise<{ batch: TicketBatchRange; passes: EventTicketPass[] }>;
+  /** Validation au portique (par le serveur). `scanned` = contenu brut du QR ou code saisi. */
   onScanTicketPass: (
-    passCode: string,
+    scanned: string,
     gate?: string,
-    scannedBy?: string
-  ) => {
-    outcome: 'valid_entry' | 'fraud_duplicate' | 'not_found' | 'blacklisted';
-    pass?: EventTicketPass;
-    previousCheckIn?: string;
-  };
+    eventId?: string
+  ) => ScanOutcome | Promise<ScanOutcome>;
   onRequestOrganizerPayout: (payload: {
     eventId: string;
     amountUSD: number;
     paymentRail: FintechRail;
     destinationAccount: string;
   }) => void;
-  onClearAccessLogs: () => void;
+  onClearAccessLogs?: () => void;
   activeSubTab?: SubTab;
   onSubTabChange?: (tab: SubTab) => void;
   currentUserSession?: UserSession;
   onUpdateUserSession?: (session: UserSession) => void;
   onBlacklistPass?: (passId: string, reason: string) => void;
   onReactivatePass?: (passId: string) => void;
-  onSyncOfflineScans?: (scans: OfflineScanItem[]) => void;
+  onSyncOfflineScans?: (scans: OfflineScanItem[]) => void | Promise<void>;
+  /** Ouvre le menu du compte connecté (remplace l'ancienne fenêtre de changement de rôle). */
+  onOpenAccount?: () => void;
+  /** Codes promo actifs définis par l'administrateur (vérifiés aussi par le serveur). */
+  promoCodes?: Array<{ code: string; percent: number; active?: boolean }>;
+  /** Remise manuelle maximale autorisée pour l'utilisateur connecté. */
+  maxDiscountPercent?: number;
+  /** Portiques configurés par l'administrateur. */
+  gates?: string[];
+  /** Organisateurs (administrateur uniquement) : à qui rattacher un nouvel événement. */
+  organizers?: Array<{ id: string; name: string; phone?: string }>;
 }
+
+export interface ScanOutcome {
+  outcome: 'valid_entry' | 'fraud_duplicate' | 'not_found' | 'blacklisted';
+  pass?: EventTicketPass;
+  previousCheckIn?: string;
+  wrongEvent?: boolean;
+}
+
+/** Code du billet contenu dans ce qui a été scanné (QR JSON signé, code seul ou code#suffixe). */
+export function extractPassCode(raw: string): string {
+  const s = raw.trim();
+  if (s.startsWith('{')) {
+    try {
+      const o = JSON.parse(s);
+      if (o && typeof o.code === 'string') return o.code.trim().toUpperCase();
+    } catch { /* texte libre */ }
+  }
+  return s.split('#')[0].trim().toUpperCase();
+}
+
+const OFFLINE_QUEUE_KEY = 'kolapass_offline_queue_v1';
+const OFFLINE_USED_KEY = 'kolapass_offline_used_v1';
+const readLocal = <T,>(key: string, fallback: T): T => {
+  try { const raw = localStorage.getItem(key); return raw ? (JSON.parse(raw) as T) : fallback; } catch { return fallback; }
+};
 
 const EVENT_CATEGORIES: EventCategory[] = [
   'Concert & Festival',
@@ -171,6 +204,7 @@ const EVENT_CATEGORIES: EventCategory[] = [
 ];
 
 const RAILS: FintechRail[] = [
+  'Espèces',
   'M-Pesa',
   'Orange Money',
   'Airtel Money',
@@ -179,18 +213,6 @@ const RAILS: FintechRail[] = [
   'Visa / Mastercard',
 ];
 
-const GATES = [
-  'Porte A (VIP & VVIP)',
-  'Entrée Principale (Standard)',
-  'Porte Ouest (Guichet Rapide)',
-  'Accès Staff & Presse',
-];
-
-const SECURITY_AGENTS = [
-  'Agent Sécurité Cédric (Porte A)',
-  'Agent Contrôle Sarah (Entrée Principale)',
-  'Superviseur Éric (Filtrage Mobile)',
-];
 
 export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
   events,
@@ -213,7 +235,14 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
   onBlacklistPass,
   onReactivatePass,
   onSyncOfflineScans,
+  onOpenAccount,
+  promoCodes = [],
+  maxDiscountPercent = 0,
+  gates: configuredGates = ['Entrée principale'],
+  organizers,
 }) => {
+  const role = currentUserSession.role;
+  const canManage = role === 'admin' || role === 'organizer';
   const [internalSubTab, setInternalSubTab] = useState<SubTab>('events');
   const subTab = activeSubTab !== undefined ? activeSubTab : internalSubTab;
   const setSubTab = (tab: SubTab) => {
@@ -222,18 +251,25 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
   };
   const [soundEnabled, setSoundEnabled] = useState(true);
 
-  // Auth & Roles Modal
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
-  // Offline Mode (Stade sans réseau)
-  const [isOfflineMode, setIsOfflineMode] = useState(false);
-  const [offlineScansQueue, setOfflineScansQueue] = useState<OfflineScanItem[]>([]);
+  // Offline Mode (Stade sans réseau) — la file des scans est conservée sur le poste
+  // (rechargement, coupure) jusqu'à la synchronisation.
+  const [isOfflineMode, setIsOfflineMode] = useState(() => readLocal<OfflineScanItem[]>(OFFLINE_QUEUE_KEY, []).length > 0);
+  const [offlineScansQueue, setOfflineScansQueue] = useState<OfflineScanItem[]>(() => readLocal(OFFLINE_QUEUE_KEY, []));
+  const [offlineUsedCodes, setOfflineUsedCodes] = useState<string[]>(() => readLocal(OFFLINE_USED_KEY, []));
+  useEffect(() => {
+    try {
+      localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(offlineScansQueue));
+      localStorage.setItem(OFFLINE_USED_KEY, JSON.stringify(offlineUsedCodes));
+    } catch { /* stockage indisponible */ }
+  }, [offlineScansQueue, offlineUsedCodes]);
 
   // Live Camera stream state
   const [useLiveCamera, setUseLiveCamera] = useState(false);
   const [liveCameraError, setLiveCameraError] = useState<string | null>(null);
   const cameraVideoRef = useRef<HTMLVideoElement>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
+  const [cameraDecoding, setCameraDecoding] = useState(false);
 
   useEffect(() => {
     if (!useLiveCamera || subTab !== 'scanner') {
@@ -245,6 +281,7 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
     }
 
     let isMounted = true;
+    let decodeTimer: number | undefined;
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       setLiveCameraError("L'accès à la caméra requiert une connexion HTTPS ou un appareil avec capteur vidéo.");
       setUseLiveCamera(false);
@@ -266,6 +303,32 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
           cameraVideoRef.current.play().catch(() => {});
         }
         setLiveCameraError(null);
+        // Lecture automatique des QR codes (API BarcodeDetector : Chrome Android, Edge, Chrome desktop récent).
+        const Detector = (window as any).BarcodeDetector;
+        if (!Detector) { setCameraDecoding(false); return; }
+        let detector: any;
+        try { detector = new Detector({ formats: ['qr_code'] }); } catch { setCameraDecoding(false); return; }
+        setCameraDecoding(true);
+        let last = '';
+        let lastAt = 0;
+        const tick = async () => {
+          if (!isMounted) return;
+          const video = cameraVideoRef.current;
+          if (video && video.readyState >= 2) {
+            try {
+              const codes = await detector.detect(video);
+              const value: string | undefined = codes?.[0]?.rawValue;
+              // Le même QR n'est pas revalidé pendant 4 secondes (le billet reste devant la caméra).
+              if (value && (value !== last || Date.now() - lastAt > 4000)) {
+                last = value;
+                lastAt = Date.now();
+                triggerScanRef.current(value);
+              }
+            } catch { /* image illisible : on réessaie */ }
+          }
+          decodeTimer = window.setTimeout(tick, 250);
+        };
+        tick();
       })
       .catch((err) => {
         console.warn('Live camera error:', err);
@@ -275,6 +338,7 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
 
     return () => {
       isMounted = false;
+      window.clearTimeout(decodeTimer);
       if (cameraStreamRef.current) {
         cameraStreamRef.current.getTracks().forEach((track) => track.stop());
         cameraStreamRef.current = null;
@@ -298,15 +362,21 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
   const [evtCategory, setEvtCategory] = useState<EventCategory>('Concert & Festival');
   const [evtOrganizer, setEvtOrganizer] = useState(currentUserSession.name || '');
   const [evtPhone, setEvtPhone] = useState(currentUserSession.phone || '+243 ');
-  const [evtVenue, setEvtVenue] = useState('Stade des Martyrs (Kinshasa)');
+  const [evtVenue, setEvtVenue] = useState('');
   const [evtCity, setEvtCity] = useState('Kinshasa');
-  const [evtDate, setEvtDate] = useState('2026-11-20T19:00');
-  const [stdPrice, setStdPrice] = useState('15');
-  const [stdCap, setStdCap] = useState('500');
-  const [vipPrice, setVipPrice] = useState('45');
-  const [vipCap, setVipCap] = useState('120');
-  const [vvipPrice, setVvipPrice] = useState('120');
-  const [vvipCap, setVvipCap] = useState('30');
+  const [evtDate, setEvtDate] = useState(() => {
+    const d = new Date(Date.now() + 30 * 86400000);
+    d.setHours(19, 0, 0, 0);
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T19:00`;
+  });
+  const [evtOwnerId, setEvtOwnerId] = useState('');
+  const [stdPrice, setStdPrice] = useState('');
+  const [stdCap, setStdCap] = useState('');
+  const [vipPrice, setVipPrice] = useState('');
+  const [vipCap, setVipCap] = useState('0');
+  const [vvipPrice, setVvipPrice] = useState('');
+  const [vvipCap, setVvipCap] = useState('0');
   const [evtCommissionType, setEvtCommissionType] = useState<'default' | 'custom'>('default');
   const [evtCustomCommission, setEvtCustomCommission] = useState('10.0');
 
@@ -319,8 +389,8 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
   const [appliedPromoPercent, setAppliedPromoPercent] = useState(0);
   const [promoMessage, setPromoMessage] = useState('');
   const [buyerName, setBuyerName] = useState('');
-  const [buyerPhone, setBuyerPhone] = useState('+243 81 ');
-  const [buyerRail, setBuyerRail] = useState<FintechRail>('M-Pesa');
+  const [buyerPhone, setBuyerPhone] = useState('');
+  const [buyerRail, setBuyerRail] = useState<FintechRail>('Espèces');
   const [guestNames, setGuestNames] = useState<string[]>(['']);
   const [generatedPurchasedPasses, setGeneratedPurchasedPasses] = useState<EventTicketPass[]>([]);
   const [paymentTransactionRef, setPaymentTransactionRef] = useState('');
@@ -329,8 +399,8 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
   const [inspectedPass, setInspectedPass] = useState<EventTicketPass | null>(null);
 
   // Scanner state
-  const [selectedGate, setSelectedGate] = useState(GATES[0]);
-  const [selectedAgent, setSelectedAgent] = useState(currentUserSession.name || SECURITY_AGENTS[0]);
+  const [selectedGate, setSelectedGate] = useState(configuredGates[0]);
+  const [scanEventId, setScanEventId] = useState('');
   const [scanInput, setScanInput] = useState('');
   const [isScanningActive, setIsScanningActive] = useState(true);
   const [scanResult, setScanResult] = useState<{
@@ -366,19 +436,17 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
     let totalGrossUSD = 0;
     let totalCommissionUSD = 0;
 
-    for (const ev of events) {
-      const rate = typeof ev.commissionRatePercent === 'number' ? ev.commissionRatePercent : 10.0;
-      for (const tier of ev.tiers) {
-        totalTicketsSold += tier.sold;
-        const tierGross = tier.sold * tier.priceUSD;
-        totalGrossUSD += tierGross;
-        totalCommissionUSD += tierGross * (rate / 100);
-      }
+    // Montants réellement encaissés (remises comprises), billet par billet.
+    for (const p of passes) {
+      if (p.status === 'cancelled') continue;
+      totalTicketsSold += 1;
+      totalGrossUSD += p.pricePaidUSD || 0;
+      totalCommissionUSD += p.platformFeeUSD || 0;
     }
 
     const checkedInPassesCount = passes.filter((p) => p.status === 'used').length;
     const blacklistedPassesCount = passes.filter((p) => p.status === 'blacklisted').length;
-    const totalOrganizerPayoutsUSD = organizerPayouts.reduce((acc, p) => acc + p.amountUSD, 0);
+    const totalOrganizerPayoutsUSD = organizerPayouts.filter((p) => p.status === 'completed').reduce((acc, p) => acc + p.amountUSD, 0);
 
     const totalBatchPlacesSold = batches.reduce((acc, b) => acc + b.quantity, 0);
     const totalBatchPlacesScanned = batches.reduce((acc, b) => acc + (b.scannedCount || 0), 0);
@@ -398,31 +466,39 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
   }, [events, passes, organizerPayouts, batches]);
 
   // Handle Event Creation
-  const handleCreateEventSubmit = (e: React.FormEvent) => {
+  const handleCreateEventSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!evtTitle.trim() || !evtVenue.trim()) return;
+    if (organizers && !evtOwnerId) return;
+    const owner = organizers?.find(o => o.id === evtOwnerId);
 
     const chosenCommission =
       evtCommissionType === 'default'
         ? 10.0
         : Math.max(0, Math.min(50, parseFloat(evtCustomCommission) || 10.0));
 
-    onCreateEvent({
+    try {
+    await onCreateEvent({
       title: evtTitle.trim(),
       category: evtCategory,
-      organizerName: evtOrganizer.trim() || currentUserSession.name,
-      organizerPhone: evtPhone.trim(),
+      organizerName: owner?.name || evtOrganizer.trim() || currentUserSession.name,
+      organizerPhone: owner?.phone || evtPhone.trim(),
+      ownerId: owner?.id,
       venue: evtVenue.trim(),
       city: evtCity.trim(),
       eventDate: new Date(evtDate).toISOString(),
-      standardPriceUSD: Math.max(1, parseFloat(stdPrice) || 10),
-      standardCap: Math.max(1, parseInt(stdCap, 10) || 100),
-      vipPriceUSD: Math.max(1, parseFloat(vipPrice) || 35),
-      vipCap: Math.max(1, parseInt(vipCap, 10) || 50),
-      vvipPriceUSD: Math.max(1, parseFloat(vvipPrice) || 100),
-      vvipCap: Math.max(1, parseInt(vvipCap, 10) || 15),
+      // Aucune valeur inventée : une catégorie sans prix ni jauge est simplement fermée (capacité 0).
+      standardPriceUSD: parseFloat(stdPrice.replace(',', '.')) || 0,
+      standardCap: Math.max(0, parseInt(stdCap, 10) || 0),
+      vipPriceUSD: parseFloat(vipPrice.replace(',', '.')) || 0,
+      vipCap: Math.max(0, parseInt(vipCap, 10) || 0),
+      vvipPriceUSD: parseFloat(vvipPrice.replace(',', '.')) || 0,
+      vvipCap: Math.max(0, parseInt(vvipCap, 10) || 0),
       commissionRatePercent: chosenCommission,
     });
+    } catch {
+      return; // message d'erreur affiché par l'application
+    }
     setEvtTitle('');
     setEvtVenue('');
     setEvtCommissionType('default');
@@ -433,116 +509,94 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
   // Promo Code Validation
   const handleApplyPromo = () => {
     const code = promoCodeInput.trim().toUpperCase();
-    if (code === 'EARLYBIRD' || code === 'EARLY10') {
-      setAppliedPromoPercent(10);
-      setPromoMessage('Code promo EARLYBIRD validé : -10%');
-    } else if (code === 'VIP2026' || code === 'KOLA15') {
-      setAppliedPromoPercent(15);
-      setPromoMessage('Code privilège VIP2026 validé : -15%');
-    } else if (code === 'FESTIVAL20' || code === 'STADE20') {
-      setAppliedPromoPercent(20);
-      setPromoMessage('Code promotionnel -20% appliqué !');
+    const promo = promoCodes.find(p => p.active !== false && p.code.toUpperCase() === code);
+    if (promo) {
+      setAppliedPromoPercent(promo.percent);
+      setPromoMessage(`Code ${promo.code} validé : -${promo.percent} %`);
     } else {
       setAppliedPromoPercent(0);
-      setPromoMessage('Code promotionnel invalide');
+      setPromoMessage(code ? 'Code promotionnel invalide' : '');
     }
   };
 
   // Step 1: Initiate Payment
-  const handleProceedToPayment = (e: React.FormEvent) => {
+  const handleProceedToPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!buyingEvent || !buyerName.trim()) return;
     setCheckoutStep('processing_payment');
-
-    // Simulate authentic Mobile Money USSD push transaction delay (1.4s)
-    setTimeout(() => {
-      const txRef = `${buyerRail.replace(/[^A-Z0-9]/gi, '').slice(0, 4).toUpperCase()}-TX-${Date.now().toString().slice(-6)}`;
-      setPaymentTransactionRef(txRef);
-
-      const generated = onPurchaseTicketPasses({
+    try {
+      const generated = await onPurchaseTicketPasses({
         eventId: buyingEvent.id,
         tierName: selectedTier,
         holderName: buyerName.trim(),
         holderPhone: buyerPhone.trim(),
         paymentRail: buyerRail,
         quantity: ticketQuantity,
-        discountPercent: appliedPromoPercent,
+        promoCode: appliedPromoPercent > 0 ? promoCodeInput.trim().toUpperCase() : undefined,
         guestNames: guestNames.map((g, idx) =>
           g.trim() ? g.trim() : `${buyerName.trim()} (Billet #${idx + 1})`
         ),
       });
-
+      setPaymentTransactionRef(generated[0]?.transactionReference || '');
       setGeneratedPurchasedPasses(generated);
       setCheckoutStep('confirmed');
-    }, 1400);
+    } catch {
+      setCheckoutStep('form'); // le serveur a refusé : message affiché, l'acheteur n'est pas débité
+    }
   };
 
   // Scan Verification Engine
-  const triggerScanVerification = (codeToScan: string) => {
-    const raw = codeToScan.trim().toUpperCase();
-    const cleanCode = raw.split('#')[0].trim();
-    if (!cleanCode) return;
+  const scanBusyRef = useRef(false);
+  const triggerScanVerification = async (codeToScan: string) => {
+    const raw = codeToScan.trim();
+    const cleanCode = extractPassCode(raw);
+    if (!cleanCode || scanBusyRef.current) return;
 
-    // OFFLINE MODE ENGINE
+    const showResult = (res: ScanOutcome, offline: boolean) => {
+      if (res.outcome === 'valid_entry') { if (soundEnabled) playSuccessChime(); }
+      else if (res.outcome === 'blacklisted') { if (soundEnabled) playBlacklistAlarm(); }
+      else if (soundEnabled) playAlertBuzzer();
+      setScanResult({ ...res, scannedCode: cleanCode, gate: selectedGate, scannedBy: currentUserSession.name, offlineModeActive: offline });
+    };
+
+    // MODE HORS-LIGNE : contrôle sur la dernière liste reçue + billets déjà entrés sur CE poste.
     if (isOfflineMode) {
       const localPass = passes.find((p) => p.passCode.toUpperCase() === cleanCode);
-      let outcome: 'valid_entry' | 'fraud_duplicate' | 'not_found' | 'blacklisted' = 'not_found';
+      let outcome: ScanOutcome['outcome'];
+      if (!localPass) outcome = 'not_found';
+      else if (localPass.status === 'blacklisted' || localPass.status === 'cancelled') outcome = 'blacklisted';
+      else if (localPass.status === 'used' || offlineUsedCodes.includes(cleanCode)) outcome = 'fraud_duplicate';
+      else outcome = 'valid_entry';
 
-      if (!localPass) {
-        outcome = 'not_found';
-        if (soundEnabled) playAlertBuzzer();
-      } else if (localPass.status === 'blacklisted') {
-        outcome = 'blacklisted';
-        if (soundEnabled) playBlacklistAlarm();
-      } else if (localPass.status === 'used') {
-        outcome = 'fraud_duplicate';
-        if (soundEnabled) playAlertBuzzer();
-      } else {
-        outcome = 'valid_entry';
-        if (soundEnabled) playSuccessChime();
-      }
-
+      if (outcome === 'valid_entry') setOfflineUsedCodes((prev) => [...prev, cleanCode]);
       const offlineItem: OfflineScanItem = {
-        id: `off-${Date.now()}`,
+        id: `off-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         timestamp: new Date().toISOString(),
         passCode: cleanCode,
         gate: selectedGate,
-        scannedBy: selectedAgent,
+        scannedBy: currentUserSession.name,
         scannedAtOffline: new Date().toLocaleTimeString('fr-FR'),
         outcome,
       };
-
       setOfflineScansQueue((prev) => [offlineItem, ...prev]);
-      setScanResult({
-        outcome,
-        pass: localPass,
-        scannedCode: cleanCode,
-        gate: selectedGate,
-        scannedBy: selectedAgent,
-        offlineModeActive: true,
-      });
+      showResult({ outcome, pass: localPass }, true);
       return;
     }
 
-    // ONLINE STANDARD VERIFICATION
-    const res = onScanTicketPass(cleanCode, selectedGate, selectedAgent);
-
-    if (res.outcome === 'valid_entry') {
-      if (soundEnabled) playSuccessChime();
-    } else if (res.outcome === 'blacklisted') {
-      if (soundEnabled) playBlacklistAlarm();
-    } else {
-      if (soundEnabled) playAlertBuzzer();
+    // EN LIGNE : le serveur valide (une seule entrée possible, même avec plusieurs portiques).
+    scanBusyRef.current = true;
+    try {
+      const res = await onScanTicketPass(raw, selectedGate, scanEventId || undefined);
+      showResult(res, false);
+    } catch {
+      setScanResult(null);
+    } finally {
+      scanBusyRef.current = false;
     }
-
-    setScanResult({
-      ...res,
-      scannedCode: cleanCode,
-      gate: selectedGate,
-      scannedBy: selectedAgent,
-      offlineModeActive: false,
-    });
   };
+
+  const triggerScanRef = useRef(triggerScanVerification);
+  triggerScanRef.current = triggerScanVerification;
 
   const handleManualScanSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -551,11 +605,16 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
   };
 
   // Sync Offline Scans to Main Server
-  const handleSyncOfflineQueue = () => {
+  const handleSyncOfflineQueue = async () => {
     if (offlineScansQueue.length === 0) return;
-    onSyncOfflineScans?.(offlineScansQueue);
-    setOfflineScansQueue([]);
-    setIsOfflineMode(false);
+    try {
+      await onSyncOfflineScans?.(offlineScansQueue);
+      setOfflineScansQueue([]);
+      setOfflineUsedCodes([]);
+      setIsOfflineMode(false);
+    } catch {
+      /* réseau encore indisponible : la file est conservée */
+    }
   };
 
   // Filter Passes
@@ -680,13 +739,13 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
               <span aria-hidden="true">·</span>
               <span>Billetterie Sécurisée (JWT & HMAC)</span>
               <span aria-hidden="true">·</span>
-              <span className="text-sky-800">Anti-Screenshot 30s</span>
+              <span className="text-sky-800">QR signé par le serveur</span>
             </div>
             <h1 className="text-xl font-black text-slate-900 tracking-tight">
               Portique Anti-Fraude & Billetterie Mobile Money (Orange, Airtel, M-Pesa)
             </h1>
             <p className="text-xs text-slate-500 max-w-3xl">
-              Génération de billets cryptographiques infalsifiables avec filigrane dynamique, QR code à usage unique, scan hors-ligne pour stade et contrôle des rôles 2FA.
+              Billets à QR code signé (HMAC-SHA256), validés par le serveur au portique : une seule entrée par billet, même avec plusieurs portes. Mode hors-ligne avec synchronisation.
             </p>
           </div>
 
@@ -695,15 +754,10 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
             {/* User Session Badge with click to open Auth Modal */}
             <button
               type="button"
-              onClick={() => setIsAuthModalOpen(true)}
+              onClick={() => onOpenAccount?.()}
               className="inline-flex items-center gap-2 rounded-xl border-2 border-sky-300 bg-sky-50 px-3 py-2 text-xs font-bold text-sky-950 hover:bg-sky-100 transition-colors shadow-2xs"
-              title="Changer de compte ou vérifier le rôle 2FA"
+              title="Mon compte (mot de passe, déconnexion)"
             >
-              <img
-                src={currentUserSession.avatarUrl}
-                alt={currentUserSession.name}
-                className="h-5 w-5 rounded-full border border-sky-400 object-cover"
-              />
               <span className="truncate max-w-[120px]">{currentUserSession.name.split(' ')[0]}</span>
               <span className="rounded-md border border-rose-300 bg-rose-50 px-1.5 py-0.2 text-[10px] uppercase font-mono font-bold text-rose-800">
                 {currentUserSession.role}
@@ -735,6 +789,7 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
             </button>
 
             {/* Create Event Button (for admin / organizer) */}
+            {canManage && (<>
             <button
               type="button"
               onClick={() => setIsCreateEventOpen(true)}
@@ -758,6 +813,7 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
               <Layers className="h-4 w-4" />
               <span>+ Plage de Billets</span>
             </button>
+            </>)}
 
             {/* Sound Toggle */}
             <button
@@ -794,7 +850,8 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
           </div>
         )}
 
-        {/* SIGNALEMENT SYSTÈME ADMIN : PLAGES DE BILLETS ÉMISES & PLACES COMPTABILISÉES VENDUES */}
+        {canManage && (<>
+{/* SIGNALEMENT SYSTÈME ADMIN : PLAGES DE BILLETS ÉMISES & PLACES COMPTABILISÉES VENDUES */}
         <div className="mt-4 rounded-2xl border-2 border-purple-300 bg-gradient-to-r from-purple-50 via-white to-sky-50 p-4 shadow-2xs">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-start gap-3">
@@ -857,51 +914,12 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
             </div>
           </div>
         </div>
+</>)}
 
-        {/* Crisp Subtab Navigation - Gray Buttons */}
-        <div className="mt-5 border-t-2 border-slate-200 pt-4 flex flex-wrap items-center gap-2 rounded-2xl border-2 border-slate-300 bg-slate-100 p-2">
-          {[
-            { id: 'events', label: '1. Événements & Vente', count: events.length },
-            { id: 'batches', label: '2. Plages de Billets (Lots)', count: batches.length, highlight: true },
-            { id: 'scanner', label: '3. Portique Caméra (Entrée)', highlight: true },
-            { id: 'passes', label: '4. Billets & Pass Émis', count: passes.length },
-            { id: 'logs', label: '5. Journal des Scans (Audit)', count: accessLogs.length },
-            { id: 'organizers', label: '6. Reversements Promoteurs' },
-            { id: 'monetization', label: '7. Rentabilité (10%)' },
-            { id: 'buyer', label: '8. 👁️ Démo Acheteur Public', highlight: true },
-          ].map((tab) => {
-            const isActive = subTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setSubTab(tab.id as SubTab)}
-                className={`rounded-xl px-3.5 py-2 text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 border-2 shadow-2xs ${
-                  isActive
-                    ? 'border-slate-800 bg-slate-800 text-white shadow-xs'
-                    : 'border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-200'
-                }`}
-              >
-                <span>{tab.label}</span>
-                {typeof tab.count === 'number' && (
-                  <span
-                    className={`text-[10px] font-mono px-1.5 py-0.2 rounded-md ${
-                      isActive ? 'bg-slate-700 text-slate-100 border border-slate-600' : 'bg-slate-200 text-slate-800'
-                    }`}
-                  >
-                    {tab.count}
-                  </span>
-                )}
-                {tab.highlight && !isActive && (
-                  <span className="h-2 w-2 rounded-full bg-rose-600 animate-pulse" />
-                )}
-              </button>
-            );
-          })}
-        </div>
       </div>
 
-      {/* 4 Crisp Metric Cards with Sky-Blue, Purple & Crimson Highlights */}
+      {canManage && (<>
+{/* 4 Crisp Metric Cards with Sky-Blue, Purple & Crimson Highlights */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="rounded-2xl border-2 border-sky-300 bg-white p-5 shadow-xs">
           <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
@@ -922,7 +940,7 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
 
         <div className="rounded-2xl border-2 border-rose-300 bg-white p-5 shadow-xs">
           <span className="text-xs font-bold uppercase tracking-wider text-rose-800">
-            Commission KolaPass (10,0% par défaut)
+            Commission KolaPass
           </span>
           <div className="mt-1 text-2xl font-black text-rose-700 font-mono tabular-nums">
             +{formatMoney(metrics.totalCommissionUSD, displayCurrency, settings.rates)}
@@ -966,10 +984,11 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
             {metrics.blacklistedPassesCount} Billet(s) Blacklisté(s)
           </div>
           <p className="mt-1 text-xs text-rose-700 font-medium">
-            Captures d&apos;écran et doublons rejetés d&apos;office
+            Doublons et billets bloqués refusés au portique
           </p>
         </div>
       </div>
+</>)}
 
       {/* SUBTAB 1: EVENTS CATALOG & SALES */}
       {subTab === 'events' && (
@@ -1112,13 +1131,13 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                             setSelectedTier('Standard');
                             setTicketQuantity(1);
                             setBuyerName('');
-                            setBuyerPhone('+243 81 ');
+                            setBuyerPhone('');
                             setGuestNames(['']);
                           }}
                           className="inline-flex items-center justify-center gap-1.5 rounded-xl border-2 border-rose-600 bg-rose-700 py-2.5 px-3 text-xs font-bold text-white hover:bg-rose-800 transition-colors shadow-2xs"
                         >
                           <Ticket className="h-3.5 w-3.5" />
-                          <span>Acheter (M-Pesa)</span>
+                          <span>Vendre des billets</span>
                         </button>
                       )}
 
@@ -1514,33 +1533,36 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                 </div>
               )}
 
-              {/* Gate & Agent Selector */}
+              {/* Porte et événement contrôlés (l'agent est le compte connecté) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Porte d&apos;accès :</label>
+                  <label htmlFor="scan-gate" className="block font-bold text-slate-700 mb-1">Porte d&apos;accès :</label>
                   <select
+                    id="scan-gate"
                     value={selectedGate}
                     onChange={(e) => setSelectedGate(e.target.value)}
                     className="w-full rounded-xl border-2 border-sky-200 bg-sky-50 px-3 py-2 font-bold text-slate-900 focus:border-rose-600 focus:outline-none"
                   >
-                    {GATES.map((g) => (
+                    {configuredGates.map((g) => (
                       <option key={g} value={g}>{g}</option>
                     ))}
                   </select>
                 </div>
-
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Agent en poste :</label>
+                  <label htmlFor="scan-event" className="block font-bold text-slate-700 mb-1">Événement contrôlé :</label>
                   <select
-                    value={selectedAgent}
-                    onChange={(e) => setSelectedAgent(e.target.value)}
+                    id="scan-event"
+                    value={scanEventId}
+                    onChange={(e) => setScanEventId(e.target.value)}
                     className="w-full rounded-xl border-2 border-sky-200 bg-sky-50 px-3 py-2 font-bold text-slate-900 focus:border-rose-600 focus:outline-none"
                   >
-                    {SECURITY_AGENTS.map((a) => (
-                      <option key={a} value={a}>{a}</option>
+                    <option value="">Tous les événements</option>
+                    {events.map((ev) => (
+                      <option key={ev.id} value={ev.id}>{ev.title}</option>
                     ))}
                   </select>
                 </div>
+                <p className="sm:col-span-2 text-[11px] text-slate-500">Agent : <strong>{currentUserSession.name}</strong> (enregistré automatiquement par le serveur)</p>
               </div>
 
               {/* Interactive Camera Viewfinder Box */}
@@ -1582,10 +1604,12 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
 
                 <div className="mt-4 text-center z-20">
                   <div className="font-mono text-xs font-bold text-rose-400 tracking-wider">
-                    [CAMÉRA HD PRÊTE — DÉTECTION RAPIDE]
+                    {useLiveCamera ? (cameraDecoding ? '[LECTURE AUTOMATIQUE DU QR ACTIVE]' : '[CAMÉRA ACTIVE — LECTURE AUTO INDISPONIBLE]') : '[CAMÉRA ARRÊTÉE]'}
                   </div>
                   <p className="mt-1 text-[11px] text-slate-400">
-                    Présentez le pass QR mobile ou papier devant le viseur
+                    {useLiveCamera && !cameraDecoding
+                      ? 'Ce navigateur ne lit pas les QR : utilisez Chrome sur Android, ou une douchette USB/Bluetooth dans le champ ci-dessous.'
+                      : 'Présentez le QR du billet (téléphone ou papier) devant le viseur'}
                   </p>
                 </div>
               </div>
@@ -1596,7 +1620,8 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                   type="text"
                   value={scanInput}
                   onChange={(e) => setScanInput(e.target.value)}
-                  placeholder="Code pass (ex: EVT101-8F3K9X2Q ou clic ci-dessous)"
+                  placeholder="Code du billet ou lecture douchette (ex. E01-7KQ9MZ3XPA)"
+                  aria-label="Code du billet"
                   className="flex-1 rounded-xl border-2 border-sky-300 bg-white px-3 py-2 text-xs font-mono font-bold text-slate-900 focus:border-rose-600 focus:outline-none"
                 />
                 <button
@@ -1607,7 +1632,8 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                 </button>
               </form>
 
-              {/* Quick test buttons */}
+              {/* Boutons de test (administrateur uniquement) */}
+              {role === 'admin' && (
               <div className="pt-1 flex flex-wrap items-center gap-2 text-xs">
                 <span className="text-[11px] font-bold text-slate-500">Test rapide :</span>
                 {passes.slice(0, 3).map((p) => (
@@ -1651,6 +1677,7 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                     </button>
                   ))}
               </div>
+              )}
             </div>
           </div>
 
@@ -1748,8 +1775,7 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                       <div className="flex items-center gap-3">
                         <img
                           src={
-                            scanResult.pass.avatarUrl ||
-                            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'
+                            scanResult.pass.avatarUrl || initialsAvatar(scanResult.pass.holderName)
                           }
                           alt={scanResult.pass.holderName}
                           className="h-16 w-16 rounded-full border-2 border-sky-400 object-cover shadow-sm"
@@ -1914,8 +1940,7 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                         <div className="flex items-center gap-2">
                           <img
                             src={
-                              p.avatarUrl ||
-                              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'
+                              p.avatarUrl || initialsAvatar(p.holderName)
                             }
                             alt={p.holderName}
                             className="h-7 w-7 rounded-full border border-sky-300 object-cover shrink-0"
@@ -1992,6 +2017,7 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                 Traçabilité seconde par seconde des passages au portique avec agent et porte d&apos;accès.
               </p>
             </div>
+            {onClearAccessLogs && (
             <button
               type="button"
               onClick={onClearAccessLogs}
@@ -2000,6 +2026,7 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
               <Trash2 className="h-3.5 w-3.5 text-slate-400" />
               <span>Vider le journal</span>
             </button>
+            )}
           </div>
 
           {/* Search & Filter */}
@@ -2109,7 +2136,7 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                 Reversements Financiers Promoteurs & Organisateurs
               </h2>
               <p className="text-xs text-slate-500">
-                Ordres de virement automatisés vers M-Pesa, Orange Money, Airtel Money, Wave ou Banque après retenue de la commission plateforme (10,0% par défaut ou personnalisée).
+                L&apos;organisateur demande un reversement (dans la limite de son solde net, commission déduite) ; l&apos;administrateur effectue le transfert puis le marque « payé » avec sa référence.
               </p>
             </div>
           </div>
@@ -2120,7 +2147,7 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                 <tr>
                   <th className="p-3">ID Reversement</th>
                   <th className="p-3">Événement & Organisateur</th>
-                  <th className="p-3">Montant Versé</th>
+                  <th className="p-3">Montant</th>
                   <th className="p-3">Canal de Règlement</th>
                   <th className="p-3">Compte Réception</th>
                   <th className="p-3">Statut Virement</th>
@@ -2140,10 +2167,16 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                     <td className="p-3 font-bold text-slate-800">{p.paymentRail}</td>
                     <td className="p-3 font-mono text-[11px] text-slate-600">{p.destinationAccount}</td>
                     <td className="p-3">
-                      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
-                        <CheckCircle2 className="h-3 w-3 text-emerald-600" />
-                        Effectué
-                      </span>
+                      {p.status === 'completed' ? (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+                          <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+                          Payé{p.transferReference ? ` (${p.transferReference})` : ''}
+                        </span>
+                      ) : p.status === 'rejected' ? (
+                        <span className="inline-flex rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-800" title={p.rejectReason}>Refusé</span>
+                      ) : (
+                        <span className="inline-flex rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-900">En attente de l&apos;administrateur</span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -2211,17 +2244,6 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
         />
       )}
 
-      {/* MODAL 1: AUTH & ROLES (ADMIN / ORGANISATEUR / AGENT) WITH 2FA SMS */}
-      <AuthRoleModal
-        isOpen={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
-        currentSession={currentUserSession}
-        onUpdateSession={(newSess) => {
-          onUpdateUserSession?.(newSess);
-          setSelectedAgent(newSess.name);
-        }}
-      />
-
       {/* MODAL 2: TICKET PASS DETAIL MODAL (ANTI-SCREENSHOT DYNAMIC QR, WHATSAPP, EMAIL, SMS & BLACKLIST) */}
       <TicketPassDetailModal
         pass={inspectedPass}
@@ -2229,13 +2251,13 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
         settings={settings}
         currentUserRole={currentUserSession.role}
         onClose={() => setInspectedPass(null)}
-        onBlacklistPass={(id, reason) => {
+        onBlacklistPass={!canManage ? undefined : (id, reason) => {
           onBlacklistPass?.(id, reason);
           setInspectedPass((prev) =>
             prev && prev.id === id ? { ...prev, status: 'blacklisted', blacklistReason: reason } : prev
           );
         }}
-        onReactivatePass={(id) => {
+        onReactivatePass={!canManage ? undefined : (id) => {
           onReactivatePass?.(id);
           setInspectedPass((prev) =>
             prev && prev.id === id ? { ...prev, status: 'valid', blacklistReason: undefined } : prev
@@ -2278,10 +2300,32 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                   required
                   value={evtTitle}
                   onChange={(e) => setEvtTitle(e.target.value)}
-                  placeholder="Ex: Fally Ipupa Live Concert Arena 2026"
+                  placeholder="Ex : Concert de fin d'année"
                   className="w-full rounded-xl border-2 border-sky-200 bg-white px-3 py-2 font-bold text-slate-900 focus:border-rose-600 focus:outline-none"
                 />
               </div>
+
+              {organizers && (
+                <div>
+                  <label htmlFor="evt-owner" className="block font-bold text-slate-700 mb-1">Organisateur responsable</label>
+                  <select
+                    id="evt-owner"
+                    required
+                    value={evtOwnerId}
+                    onChange={(e) => setEvtOwnerId(e.target.value)}
+                    className="w-full rounded-xl border-2 border-sky-200 bg-white px-3 py-2 font-semibold text-slate-800 focus:border-rose-600 focus:outline-none"
+                  >
+                    <option value="">— Choisir —</option>
+                    <option value={currentUserSession.id}>{currentUserSession.name} (moi, administrateur)</option>
+                    {organizers.map((o) => (
+                      <option key={o.id} value={o.id}>{o.name}</option>
+                    ))}
+                  </select>
+                  {organizers.length === 0 && (
+                    <p className="mt-1 text-[11px] text-amber-700">Aucun compte organisateur : créez-en un dans « Administration », ou rattachez l&apos;événement à vous-même.</p>
+                  )}
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -2653,7 +2697,7 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
 
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">
-                    Téléphone Mobile Money (Réception du Pass QR)
+                    Téléphone de l'acheteur
                   </label>
                   <input
                     type="tel"
@@ -2667,7 +2711,7 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                 {/* Mobile Money Operator Selection */}
                 <div>
                   <label className="block font-bold text-slate-700 mb-1.5">
-                    4. Opérateur Mobile Money (Requis avant émission QR)
+                    4. Moyen de paiement encaissé
                   </label>
                   <div className="grid grid-cols-3 gap-2">
                     {RAILS.map((r) => (
@@ -2722,7 +2766,7 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                   className="w-full inline-flex items-center justify-center gap-2 rounded-xl border-2 border-rose-600 bg-rose-700 py-3 text-xs font-black text-white hover:bg-rose-800 transition-colors shadow-xs"
                 >
                   <Lock className="h-4 w-4" />
-                  <span>Initier le Paiement {buyerRail} & Obtenir le Pass QR</span>
+                  <span>Paiement reçu ({buyerRail}) : émettre les billets</span>
                 </button>
               </form>
             )}
@@ -2736,16 +2780,16 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                 </div>
                 <div>
                   <h4 className="text-base font-extrabold text-slate-900">
-                    Demande de Débit Push USSD en cours...
+                    Émission des billets par le serveur…
                   </h4>
                   <p className="mt-1 text-xs text-slate-500 max-w-xs mx-auto">
-                    Une notification a été transmise au{' '}
-                    <strong className="font-mono text-slate-800">{buyerPhone}</strong> via{' '}
-                    <strong className="text-rose-800">{buyerRail}</strong>.
+                    Vente enregistrée pour{' '}
+                    <strong className="font-mono text-slate-800">{buyerPhone}</strong> ({' '}
+                    <strong className="text-rose-800">{buyerRail}</strong>).
                   </p>
                 </div>
                 <div className="rounded-xl border border-sky-300 bg-sky-50 p-3 text-[11px] text-sky-900 font-mono">
-                  * Pas de paiement validé = aucun pass émis (Règle stricte anti-fraude)
+                  * Émettez les billets seulement après avoir reçu le paiement.
                 </div>
               </div>
             )}
@@ -2758,7 +2802,7 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                 </div>
                 <div>
                   <h4 className="text-base font-black text-slate-900">
-                    Paiement Validé avec Succès !
+                    Billets émis !
                   </h4>
                   <p className="mt-0.5 text-xs text-slate-500">
                     Réf. Transaction :{' '}
@@ -2876,7 +2920,7 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                   type="submit"
                   className="rounded-xl border-2 border-rose-600 bg-rose-700 px-4 py-2 font-bold text-white hover:bg-rose-800 shadow-xs"
                 >
-                  Confirmer le Virement
+                  Demander le reversement
                 </button>
               </div>
             </form>

@@ -39,7 +39,7 @@ import {
   StoreSettings,
   TicketingEvent,
 } from '../types';
-import { formatDateTime, formatMoney } from '../utils/format';
+import { formatDateTime, formatMoney, initialsAvatar } from '../utils/format';
 import { SvgQrCode } from './SvgQrCode';
 import { getDynamicQrToken } from '../utils/cryptoJwt';
 
@@ -57,7 +57,7 @@ interface BuyerPortalViewProps {
     quantity?: number;
     discountPercent?: number;
     guestNames?: string[];
-  }) => EventTicketPass[];
+  }) => EventTicketPass[] | Promise<EventTicketPass[]>;
   onExitToConsole: () => void;
 }
 
@@ -216,9 +216,10 @@ export const BuyerPortalView: React.FC<BuyerPortalViewProps> = ({
 
     setCheckoutStep('ussd_pending');
 
-    // Simulate authentic mobile operator USSD approval delay (1.8s)
-    setTimeout(() => {
-      const created = onPurchasePasses({
+    void (async () => {
+      let created: EventTicketPass[];
+      try {
+        created = await onPurchasePasses({
         eventId: currentEvent.id,
         tierName: selectedTier,
         holderName: buyerName.trim(),
@@ -230,13 +231,17 @@ export const BuyerPortalView: React.FC<BuyerPortalViewProps> = ({
           g.trim() ? g.trim() : `${buyerName} (Billet #${i + 1})`
         ),
       });
+      } catch {
+        setCheckoutStep('form');
+        return;
+      }
 
       setNewlyIssuedPasses(created);
       if (created.length > 0) {
         setLatestPass(created[0]);
       }
       setCheckoutStep('success');
-    }, 1800);
+    })();
   };
 
   const handleSendToWhatsApp = (pass: EventTicketPass) => {
@@ -905,7 +910,7 @@ export const BuyerPortalView: React.FC<BuyerPortalViewProps> = ({
                       </div>
 
                       <div className="p-2 bg-white rounded-xl border border-slate-200 relative">
-                        <SvgQrCode value={dynamicQrToken || latestPass.passCode} size={170} />
+                        <SvgQrCode value={latestPass.qrPayload || latestPass.passCode} size={170} />
                         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                           <div className="rounded-full bg-white/95 border border-sky-300 p-1.5 shadow-xs">
                             <ShieldCheck className="h-5 w-5 text-sky-700" />
@@ -927,8 +932,7 @@ export const BuyerPortalView: React.FC<BuyerPortalViewProps> = ({
                     <div className="rounded-xl border border-sky-200 bg-white p-3 flex items-center gap-3">
                       <img
                         src={
-                          latestPass.avatarUrl ||
-                          'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'
+                          latestPass.avatarUrl || initialsAvatar(latestPass.holderName)
                         }
                         alt={latestPass.holderName}
                         className="h-10 w-10 rounded-full border border-sky-300 object-cover"
@@ -1081,7 +1085,7 @@ export const BuyerPortalView: React.FC<BuyerPortalViewProps> = ({
                   <div className={`flex flex-col items-center justify-center rounded-2xl border p-3 ${
                     isPastPass ? 'border-amber-200 bg-amber-50/40' : 'border-sky-200 bg-sky-50/50'
                   }`}>
-                    <SvgQrCode value={p.passCode} size={110} />
+                    <SvgQrCode value={p.qrPayload || p.passCode} size={110} />
                     <span className="mt-1 font-mono text-[10px] text-slate-500">
                       Titulaire : <strong>{p.holderName}</strong>
                     </span>

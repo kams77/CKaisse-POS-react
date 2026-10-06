@@ -68,3 +68,19 @@ export function formatDateTime(isoString: string): string {
     return isoString;
   }
 }
+
+/**
+ * Pastille avec les initiales du titulaire (aucune photo : on n'affiche jamais le visage d'une
+ * autre personne, ce qui tromperait l'agent au portique).
+ */
+export function initialsAvatar(name: string): string {
+  const initials = (name || '?')
+    .replace(/\(.*?\)/g, '')
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map(w => w[0]?.toUpperCase() || '')
+    .join('') || '?';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#e0f2fe"/><text x="32" y="40" font-family="sans-serif" font-size="24" font-weight="700" text-anchor="middle" fill="#0c4a6e">${initials.replace(/[<&>]/g, '')}</text></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
