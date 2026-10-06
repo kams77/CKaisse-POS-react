@@ -198,7 +198,8 @@ export type FintechRail =
   | 'Airtel Money'
   | 'Wave'
   | 'MTN MoMo'
-  | 'Visa / Mastercard';
+  | 'Visa / Mastercard'
+  | 'Espèces';
 
 export interface PaymentLinkItem {
   id: string;
@@ -340,6 +341,8 @@ export interface EventTicketPass {
   rangeTotal?: number;
   isBatchTicket?: boolean;
   distributorName?: string;
+  discountLabel?: string;
+  soldByName?: string;
 }
 
 export interface TicketBatchRange {
@@ -411,7 +414,9 @@ export interface OrganizerPayout {
   amountUSD: number;
   paymentRail: FintechRail;
   destinationAccount: string;
-  status: 'pending' | 'completed';
+  status: 'pending' | 'completed' | 'rejected';
   requestedAt: string;
   completedAt?: string;
+  transferReference?: string;
+  rejectReason?: string;
 }

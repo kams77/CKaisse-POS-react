@@ -33,8 +33,12 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   handleReset = () => {
+    // Les données sont sur le serveur : on ne vide que les préférences d'affichage,
+    // jamais la file des scans hors-ligne non encore synchronisés.
     try {
-      localStorage.clear();
+      Object.keys(localStorage)
+        .filter(k => !k.startsWith('kolapass_offline_'))
+        .forEach(k => localStorage.removeItem(k));
       sessionStorage.clear();
     } catch {
       // ignore

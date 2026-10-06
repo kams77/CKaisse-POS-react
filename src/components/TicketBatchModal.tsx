@@ -56,7 +56,7 @@ interface TicketBatchModalProps {
     distributorName?: string;
     distributorPhone?: string;
     notes?: string;
-  }) => { batch: TicketBatchRange; passes: EventTicketPass[] };
+  }) => { batch: TicketBatchRange; passes: EventTicketPass[] } | Promise<{ batch: TicketBatchRange; passes: EventTicketPass[] }>;
   onPrintBatch?: (batch: TicketBatchRange) => void;
   onTestScanPass?: (passCode: string) => void;
 }
@@ -134,7 +134,7 @@ export const TicketBatchModal: React.FC<TicketBatchModalProps> = ({
     return `Plage ${formTierName} (${totalCount} places) — ${selectedEvent.title.slice(0, 30)}`;
   }, [selectedEvent, formTierName, totalCount]);
 
-  const handleSubmitCreate = (e: React.FormEvent) => {
+  const handleSubmitCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
 
@@ -159,7 +159,7 @@ export const TicketBatchModal: React.FC<TicketBatchModalProps> = ({
     const organizerName = currentUserSession?.name || selectedEvent.organizerName || 'Organisateur';
 
     try {
-      const result = onGenerateBatch({
+      const result = await onGenerateBatch({
         eventId: selectedEvent.id,
         tierName: formTierName,
         name: finalName,
