@@ -16,7 +16,13 @@
     visibility: hidden;
   }
   #printable-receipt,
-  #printable-receipt * {
+  #printable-receipt *,
+  #printable-batch-sheet,
+  #printable-batch-sheet *,
+  #printable-ticket-pass,
+  #printable-ticket-pass *,
+  .printable-area,
+  .printable-area * {
     visibility: visible;
   }
   #printable-receipt {
@@ -29,6 +35,23 @@
     color: black;
     box-shadow: none !important;
     border: none !important;
+  }
+  #printable-batch-sheet,
+  #printable-ticket-pass,
+  .printable-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    background: white;
+    color: black;
+    box-shadow: none !important;
+  }
+  .print-break-avoid {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
   }
 }
 

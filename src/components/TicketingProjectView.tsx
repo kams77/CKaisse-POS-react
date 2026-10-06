@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   AlertTriangle,
@@ -9,6 +9,7 @@ import {
   Building2,
   Calendar,
   Camera,
+  CameraOff,
   CheckCircle2,
   Clock,
   Coins,
@@ -49,6 +50,7 @@ import {
   X,
   Barcode,
   Scissors,
+  Video,
 } from 'lucide-react';
 import {
   AccessLogEntry,
@@ -226,6 +228,59 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
   // Offline Mode (Stade sans réseau)
   const [isOfflineMode, setIsOfflineMode] = useState(false);
   const [offlineScansQueue, setOfflineScansQueue] = useState<OfflineScanItem[]>([]);
+
+  // Live Camera stream state
+  const [useLiveCamera, setUseLiveCamera] = useState(false);
+  const [liveCameraError, setLiveCameraError] = useState<string | null>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+
+  useEffect(() => {
+    if (!useLiveCamera || subTab !== 'scanner') {
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+        cameraStreamRef.current = null;
+      }
+      return;
+    }
+
+    let isMounted = true;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setLiveCameraError("L'accès à la caméra requiert une connexion HTTPS ou un appareil avec capteur vidéo.");
+      setUseLiveCamera(false);
+      return;
+    }
+
+    navigator.mediaDevices
+      .getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+      })
+      .then((stream) => {
+        if (!isMounted) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        cameraStreamRef.current = stream;
+        if (cameraVideoRef.current) {
+          cameraVideoRef.current.srcObject = stream;
+          cameraVideoRef.current.play().catch(() => {});
+        }
+        setLiveCameraError(null);
+      })
+      .catch((err) => {
+        console.warn('Live camera error:', err);
+        setLiveCameraError('Accès caméra refusé. Utilisez la saisie manuelle ou les boutons de test.');
+        setUseLiveCamera(false);
+      });
+
+    return () => {
+      isMounted = false;
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+        cameraStreamRef.current = null;
+      }
+    };
+  }, [useLiveCamera, subTab]);
 
   // Batch Ranges Modal State
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
@@ -1412,7 +1467,27 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                   </h3>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLiveCameraError(null);
+                      setUseLiveCamera((prev) => !prev);
+                    }}
+                    className={`inline-flex items-center gap-1.5 rounded-lg border-2 px-2.5 py-1 text-xs font-bold transition-colors ${
+                      useLiveCamera
+                        ? 'border-rose-500 bg-rose-50 text-rose-900 shadow-xs'
+                        : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    {useLiveCamera ? (
+                      <CameraOff className="h-3.5 w-3.5 text-rose-600" />
+                    ) : (
+                      <Video className="h-3.5 w-3.5 text-slate-600" />
+                    )}
+                    <span>{useLiveCamera ? 'Arrêter Caméra' : 'Activer Caméra Réelle'}</span>
+                  </button>
+
                   <span className={`inline-flex items-center gap-1.5 rounded-lg border-2 px-2.5 py-1 text-xs font-bold ${
                     isOfflineMode ? 'border-amber-400 bg-amber-50 text-amber-900' : 'border-emerald-300 bg-emerald-50 text-emerald-900'
                   }`}>
@@ -1421,6 +1496,23 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                   </span>
                 </div>
               </div>
+
+              {/* Live camera error banner if any */}
+              {liveCameraError && (
+                <div className="flex items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-900">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
+                    <span>{liveCameraError}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setLiveCameraError(null)}
+                    className="text-amber-700 hover:text-amber-950 font-bold"
+                  >
+                    Fermer
+                  </button>
+                </div>
+              )}
 
               {/* Gate & Agent Selector */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
@@ -1453,6 +1545,16 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
 
               {/* Interactive Camera Viewfinder Box */}
               <div className="relative aspect-video w-full rounded-2xl border-4 border-slate-900 bg-slate-950 overflow-hidden flex flex-col items-center justify-center p-6 text-white shadow-inner">
+                {/* Real Camera Live Feed video tag */}
+                {useLiveCamera && (
+                  <video
+                    ref={cameraVideoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="absolute inset-0 h-full w-full object-cover z-0"
+                  />
+                )}
                 {/* Visual Screen Flash when scanned */}
                 {scanResult && (
                   <div

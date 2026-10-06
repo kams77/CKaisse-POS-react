@@ -232,7 +232,7 @@ export const TicketPassDetailModal: React.FC<TicketPassDetailModalProps> = ({
         </div>
 
         {/* Main Display Area */}
-        <div className="mt-5">
+        <div id="printable-ticket-pass" className="mt-5 printable-area">
           {viewMode === 'mobile' && (
             <div className="mx-auto max-w-sm rounded-2xl border-2 border-sky-300 bg-linear-to-b from-sky-50 via-white to-sky-50/50 p-5 shadow-md">
               {/* Event Info */}

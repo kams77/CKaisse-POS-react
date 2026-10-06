@@ -32,30 +32,45 @@ export function computeHmacSignature(payload: string, secret = KOLAPASS_SIGNING_
 }
 
 /**
- * Base64URL encoder
+ * Base64URL encoder (browser and node safe)
  */
 function base64UrlEncode(str: string): string {
-  if (typeof btoa === 'function') {
-    return btoa(unescape(encodeURIComponent(str)))
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=+$/, '');
+  try {
+    if (typeof TextEncoder !== 'undefined' && typeof btoa === 'function') {
+      const bytes = new TextEncoder().encode(str);
+      let binString = '';
+      for (let i = 0; i < bytes.length; i++) {
+        binString += String.fromCharCode(bytes[i]);
+      }
+      return btoa(binString)
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+    }
+    return Buffer.from(str).toString('base64url');
+  } catch {
+    return '';
   }
-  return Buffer.from(str).toString('base64url');
 }
 
 /**
- * Base64URL decoder
+ * Base64URL decoder (browser and node safe)
  */
 export function base64UrlDecode(str: string): string {
-  let b64 = str.replace(/-/g, '+').replace(/_/g, '/');
-  while (b64.length % 4) {
-    b64 += '=';
+  try {
+    let b64 = str.replace(/-/g, '+').replace(/_/g, '/');
+    while (b64.length % 4) {
+      b64 += '=';
+    }
+    if (typeof TextDecoder !== 'undefined' && typeof atob === 'function') {
+      const binString = atob(b64);
+      const bytes = Uint8Array.from(binString, (m) => m.charCodeAt(0));
+      return new TextDecoder().decode(bytes);
+    }
+    return Buffer.from(b64, 'base64').toString('utf8');
+  } catch {
+    return str;
   }
-  if (typeof atob === 'function') {
-    return decodeURIComponent(escape(atob(b64)));
-  }
-  return Buffer.from(b64, 'base64').toString('utf8');
 }
 
 /**
