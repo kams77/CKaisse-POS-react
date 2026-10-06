@@ -660,8 +660,8 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
           </div>
         )}
 
-        {/* Crisp Subtab Navigation */}
-        <div className="mt-5 border-t-2 border-sky-100 pt-4 flex flex-wrap items-center gap-2">
+        {/* Crisp Subtab Navigation - Gray Buttons */}
+        <div className="mt-5 border-t-2 border-slate-200 pt-4 flex flex-wrap items-center gap-2 rounded-2xl border-2 border-slate-300 bg-slate-100 p-2">
           {[
             { id: 'events', label: '1. Événements & Vente', count: events.length },
             { id: 'scanner', label: '2. Portique Caméra (Entrée)', highlight: true },
@@ -669,32 +669,35 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
             { id: 'logs', label: '4. Journal des Scans (Audit)', count: accessLogs.length },
             { id: 'organizers', label: '5. Reversements Promoteurs' },
             { id: 'monetization', label: '6. Rentabilité (7%)' },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setSubTab(tab.id as SubTab)}
-              className={`rounded-xl px-3.5 py-2 text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 border-2 ${
-                subTab === tab.id
-                  ? 'border-rose-600 bg-rose-700 text-white shadow-xs'
-                  : 'border-sky-200 bg-white text-slate-700 hover:border-sky-300 hover:bg-sky-50'
-              }`}
-            >
-              <span>{tab.label}</span>
-              {typeof tab.count === 'number' && (
-                <span
-                  className={`text-[10px] font-mono px-1.5 py-0.2 rounded-md ${
-                    subTab === tab.id ? 'bg-white/20 text-white' : 'bg-sky-100 text-sky-900'
-                  }`}
-                >
-                  {tab.count}
-                </span>
-              )}
-              {tab.highlight && subTab !== tab.id && (
-                <span className="h-2 w-2 rounded-full bg-rose-600 animate-pulse" />
-              )}
-            </button>
-          ))}
+          ].map((tab) => {
+            const isActive = subTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setSubTab(tab.id as SubTab)}
+                className={`rounded-xl px-3.5 py-2 text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 border-2 shadow-2xs ${
+                  isActive
+                    ? 'border-slate-800 bg-slate-800 text-white shadow-xs'
+                    : 'border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-200'
+                }`}
+              >
+                <span>{tab.label}</span>
+                {typeof tab.count === 'number' && (
+                  <span
+                    className={`text-[10px] font-mono px-1.5 py-0.2 rounded-md ${
+                      isActive ? 'bg-slate-700 text-slate-100 border border-slate-600' : 'bg-slate-200 text-slate-800'
+                    }`}
+                  >
+                    {tab.count}
+                  </span>
+                )}
+                {tab.highlight && !isActive && (
+                  <span className="h-2 w-2 rounded-full bg-rose-600 animate-pulse" />
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
 

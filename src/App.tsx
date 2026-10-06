@@ -1270,40 +1270,49 @@ export default function App() {
           </span>
         </div>
 
-        {/* Zone 2: Navigation directly controlling the Billetterie sections */}
-        <nav className="hidden md:flex items-center gap-5 text-xs font-semibold text-slate-600">
+        {/* Zone 2: Navbar sous forme de boutons grise */}
+        <nav className="hidden lg:flex items-center gap-1.5 rounded-2xl border-2 border-slate-300 bg-slate-100 p-1.5 shadow-2xs">
           {[
             { id: 'events', label: 'Événements & Vente' },
             { id: 'scanner', label: 'Portique Caméra', highlight: true },
-            { id: 'passes', label: 'Billets & Pass Émis', count: ticketPasses.length },
+            { id: 'passes', label: 'Billets & Pass', count: ticketPasses.length },
             { id: 'logs', label: 'Journal des Scans', count: accessLogs.length },
-            { id: 'organizers', label: 'Reversements Promoteurs' },
+            { id: 'organizers', label: 'Reversements' },
             { id: 'monetization', label: 'Rentabilité (7%)' },
-          ].map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => {
-                setActiveTab('ticketing');
-                setTicketingSubTab(item.id as SubTab);
-              }}
-              className={`py-1 transition-colors whitespace-nowrap flex items-center gap-1.5 ${
-                activeTab === 'ticketing' && ticketingSubTab === item.id
-                  ? 'text-rose-900 font-bold underline underline-offset-8 decoration-2 decoration-rose-600'
-                  : 'hover:text-slate-950'
-              }`}
-            >
-              <span>{item.label}</span>
-              {typeof item.count === 'number' && (
-                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-md border border-sky-200 bg-sky-100 text-sky-800">
-                  {item.count}
-                </span>
-              )}
-              {item.highlight && ticketingSubTab !== item.id && (
-                <span className="h-2 w-2 rounded-full bg-rose-600 animate-pulse" />
-              )}
-            </button>
-          ))}
+          ].map((item) => {
+            const isActive = activeTab === 'ticketing' && ticketingSubTab === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => {
+                  setActiveTab('ticketing');
+                  setTicketingSubTab(item.id as SubTab);
+                }}
+                className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition-all border shadow-2xs ${
+                  isActive
+                    ? 'border-slate-800 bg-slate-800 text-white shadow-xs'
+                    : 'border-slate-300/80 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-200/80 hover:text-slate-950'
+                }`}
+              >
+                <span>{item.label}</span>
+                {typeof item.count === 'number' && (
+                  <span
+                    className={`rounded-md px-1.5 py-0.2 font-mono text-[10px] ${
+                      isActive
+                        ? 'bg-slate-700 text-slate-100 border border-slate-600'
+                        : 'bg-slate-100 text-slate-700 border border-slate-200'
+                    }`}
+                  >
+                    {item.count}
+                  </span>
+                )}
+                {item.highlight && !isActive && (
+                  <span className="h-2 w-2 rounded-full bg-rose-600 animate-pulse" />
+                )}
+              </button>
+            );
+          })}
         </nav>
 
         {/* Zone 3: Currency selector & Quick Scanner Launch & Role Badge */}
@@ -1312,7 +1321,7 @@ export default function App() {
             aria-label="Choisir la devise d'affichage"
             value={displayCurrency}
             onChange={(e) => setDisplayCurrency(e.target.value as CurrencyCode)}
-            className="rounded-lg border-2 border-sky-300 bg-sky-50 px-3 py-1.5 text-xs font-mono font-bold text-slate-800 focus:border-rose-600 focus:outline-none"
+            className="rounded-lg border-2 border-slate-300 bg-slate-100 px-3 py-1.5 text-xs font-mono font-bold text-slate-800 focus:border-slate-700 focus:outline-none"
           >
             <option value="USD">USD ($)</option>
             <option value="CDF">CDF (FC)</option>
@@ -1326,15 +1335,15 @@ export default function App() {
               setActiveTab('ticketing');
               setTicketingSubTab('scanner');
             }}
-            className="rounded-lg border-2 border-rose-600 bg-rose-700 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-rose-800 transition-colors whitespace-nowrap shadow-xs"
+            className="rounded-lg border-2 border-slate-800 bg-slate-800 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-slate-900 transition-colors whitespace-nowrap shadow-xs"
           >
             Scanner Caméra
           </button>
         </div>
       </header>
 
-      {/* Mobile Navigation Bar for KolaPass */}
-      <div className="flex md:hidden items-center gap-2 overflow-x-auto border-b-2 border-sky-300 bg-sky-50 px-4 py-2 text-xs">
+      {/* Mobile Navigation Bar for KolaPass sous forme de boutons grise */}
+      <div className="flex lg:hidden items-center gap-1.5 overflow-x-auto border-b-2 border-slate-300 bg-slate-100 p-2 text-xs">
         {[
           { id: 'events', label: 'Événements' },
           { id: 'scanner', label: 'Scanner QR' },
@@ -1342,23 +1351,26 @@ export default function App() {
           { id: 'logs', label: `Audit (${accessLogs.length})` },
           { id: 'organizers', label: 'Reversements' },
           { id: 'monetization', label: 'Finances' },
-        ].map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => {
-              setActiveTab('ticketing');
-              setTicketingSubTab(item.id as SubTab);
-            }}
-            className={`rounded-md px-3 py-1.5 font-bold whitespace-nowrap border ${
-              activeTab === 'ticketing' && ticketingSubTab === item.id
-                ? 'border-rose-600 bg-rose-700 text-white'
-                : 'border-sky-200 bg-white text-slate-700 hover:bg-sky-100'
-            }`}
-          >
-            {item.label}
-          </button>
-        ))}
+        ].map((item) => {
+          const isActive = activeTab === 'ticketing' && ticketingSubTab === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => {
+                setActiveTab('ticketing');
+                setTicketingSubTab(item.id as SubTab);
+              }}
+              className={`rounded-xl px-3 py-1.5 font-bold whitespace-nowrap border text-xs shadow-2xs transition-all ${
+                isActive
+                  ? 'border-slate-800 bg-slate-800 text-white'
+                  : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              {item.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* Sub-header context bar dedicated to Billetterie & Portique */}
