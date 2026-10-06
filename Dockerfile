@@ -1,7 +1,7 @@
 # KolaPass — image de production (application compilée + serveur Node sans dépendance).
 FROM node:22-alpine AS build
 WORKDIR /app
-COPY package.json ./
+COPY package.json .npmrc ./
 RUN npm install --no-audit --no-fund
 COPY index.html vite.config.ts tsconfig.json ./
 COPY src ./src

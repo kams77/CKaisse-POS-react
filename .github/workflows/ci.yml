@@ -12,7 +12,9 @@ jobs:
         with:
           node-version: 22
       - name: Installation
-        run: npm install --no-audit --no-fund
+        run: |
+          npm install --no-audit --no-fund 2>&1 | tee npm.log || true
+          if [ ! -d node_modules/vite ]; then grep -E "ERR|error" npm.log | head -20 | while read -r l; do echo "::error::$l"; done; exit 1; fi
       - name: Vérification TypeScript (informative)
         run: npm run lint
         continue-on-error: true
