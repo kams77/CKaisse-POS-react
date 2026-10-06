@@ -91,3 +91,29 @@ export function playAlertBuzzer() {
     // ignore
   }
 }
+
+/**
+ * High-urgency warning alarm: rapid multi-tone siren for blacklisted/stolen tickets.
+ */
+export function playBlacklistAlarm() {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+
+  try {
+    const now = ctx.currentTime;
+    for (let i = 0; i < 3; i++) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(i % 2 === 0 ? 800 : 400, now + i * 0.15);
+      gain.gain.setValueAtTime(0.4, now + i * 0.15);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + i * 0.15 + 0.12);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + i * 0.15);
+      osc.stop(now + i * 0.15 + 0.12);
+    }
+  } catch {
+    // ignore
+  }
+}

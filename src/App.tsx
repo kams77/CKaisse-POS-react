@@ -27,6 +27,9 @@ import {
   StockMovement,
   StoreSettings,
   TicketingEvent,
+  UserRole,
+  UserSession,
+  OfflineScanItem,
 } from './types';
 import {
   INITIAL_ACCESS_LOGS,
@@ -44,7 +47,9 @@ import {
   INITIAL_SETTINGS,
   INITIAL_STOCK_MOVEMENTS,
   INITIAL_TICKET_PASSES,
+  INITIAL_USER_SESSIONS,
 } from './data/initialData';
+import { generateSecurePassCode, generateTicketJwt } from './utils/cryptoJwt';
 import { PosTerminalView } from './components/PosTerminalView';
 import {
   buildAutoSkuPreview,
@@ -900,6 +905,18 @@ export default function App() {
     return created;
   };
 
+  const [userSession, setUserSession] = useState<UserSession>(() =>
+    loadFromStorage('kolapass_user_session_v1', INITIAL_USER_SESSIONS.admin)
+  );
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('kolapass_user_session_v1', JSON.stringify(userSession));
+    } catch {
+      // ignore
+    }
+  }, [userSession]);
+
   const handlePurchaseTicketPass = (payload: {
     eventId: string;
     tierName: 'Standard' | 'VIP' | 'VVIP';
@@ -920,27 +937,39 @@ export default function App() {
     const finalUnitPrice = basePriceUSD * (1 - discountRate);
 
     const createdPasses: EventTicketPass[] = [];
+    const txRef = `${payload.paymentRail.replace(/[^a-zA-Z0-9]/g, '').slice(0, 5).toUpperCase()}-TX-${Date.now()}`;
 
     for (let i = 0; i < qty; i++) {
       const guestName =
         qty === 1
           ? payload.holderName
           : payload.guestNames?.[i]?.trim() ||
-            `${payload.holderName} (Billet #${i + 1})`;
+            `${payload.holderName} (Invité #${i + 1})`;
 
       const feeUSD = Number((finalUnitPrice * 0.07).toFixed(2));
       const netUSD = Number((finalUnitPrice - feeUSD).toFixed(2));
 
-      const randomCode = Math.floor(1000 + Math.random() * 9000);
-      const sig = `SIG-SHA256-${Math.random()
-        .toString(16)
-        .slice(2, 12)
-        .toUpperCase()}`;
+      // Cryptographically non-sequential pass code (Format: EVT123-8F3K9X2Q)
+      const securePassCode = generateSecurePassCode(targetEvent.code);
+
+      // Sign with JWT + HMAC-SHA256
+      const { jwtToken, signature, fullQrData } = generateTicketJwt({
+        jti: `tkt-${Date.now()}-${i}`,
+        evt: targetEvent.id,
+        evtTitle: targetEvent.title,
+        tier: payload.tierName,
+        name: guestName,
+        phone: payload.holderPhone,
+        code: securePassCode,
+      });
 
       const newPass: EventTicketPass = {
         id: `pass-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 7)}`,
-        passCode: `PASS-KOLA-${randomCode}`,
-        qrSignature: sig,
+        passCode: securePassCode,
+        qrSignature: `HMAC-SHA256:${signature}`,
+        jwtToken,
+        qrPayload: fullQrData,
+        avatarUrl: `https://images.unsplash.com/photo-${1534528741775 + (i * 200)}?w=150&auto=format&fit=crop&q=80`,
         eventId: targetEvent.id,
         eventTitle: targetEvent.title,
         eventDate: targetEvent.eventDate,
@@ -952,6 +981,7 @@ export default function App() {
         platformFeeUSD: feeUSD,
         netOrganizerUSD: netUSD,
         paymentRail: payload.paymentRail,
+        transactionReference: txRef,
         status: 'valid',
         scanAttempts: 0,
         purchasedAt: new Date().toISOString(),
@@ -980,14 +1010,16 @@ export default function App() {
   const handleScanTicketPass = (
     passCode: string,
     gate: string = 'Porte A (VIP / VVIP)',
-    scannedBy: string = 'Agent Sécurité 1'
+    scannedBy: string = 'Agent Sécurité Cédric'
   ): {
-    outcome: 'valid_entry' | 'fraud_duplicate' | 'not_found';
+    outcome: 'valid_entry' | 'fraud_duplicate' | 'not_found' | 'blacklisted';
     pass?: EventTicketPass;
     previousCheckIn?: string;
   } => {
+    // Extract base code in case a dynamic code with #rollingHash was scanned
+    const cleanCode = passCode.split('#')[0].trim().toUpperCase();
     const targetPass = ticketPasses.find(
-      (p) => p.passCode.toUpperCase() === passCode.trim().toUpperCase()
+      (p) => p.passCode.toUpperCase() === cleanCode
     );
     const nowIso = new Date().toISOString();
 
@@ -995,17 +1027,43 @@ export default function App() {
       const logEntry: AccessLogEntry = {
         id: `log-${Date.now()}`,
         timestamp: nowIso,
-        passCode: passCode.trim().toUpperCase(),
+        passCode: cleanCode,
         holderName: 'Inconnu',
         eventTitle: 'Non identifié',
         tierName: 'N/A',
         gate,
         scannedBy,
         result: 'invalid_unknown',
-        notes: 'Code QR inconnu ou inexistant dans la base',
+        notes: 'Code QR non répertorié ou contrefait',
       };
       setAccessLogs((prev) => [logEntry, ...prev]);
       return { outcome: 'not_found' };
+    }
+
+    // Check if blacklisted
+    if (targetPass.status === 'blacklisted') {
+      const updatedPass: EventTicketPass = {
+        ...targetPass,
+        scanAttempts: targetPass.scanAttempts + 1,
+      };
+      setTicketPasses((prev) =>
+        prev.map((p) => (p.id === targetPass.id ? updatedPass : p))
+      );
+
+      const logEntry: AccessLogEntry = {
+        id: `log-${Date.now()}`,
+        timestamp: nowIso,
+        passCode: targetPass.passCode,
+        holderName: targetPass.holderName,
+        eventTitle: targetPass.eventTitle,
+        tierName: targetPass.tierName,
+        gate,
+        scannedBy,
+        result: 'blacklisted_denied',
+        notes: `REFUS CRITIQUE: Billet sur liste noire (${targetPass.blacklistReason || 'Opposition'})`,
+      };
+      setAccessLogs((prev) => [logEntry, ...prev]);
+      return { outcome: 'blacklisted', pass: updatedPass };
     }
 
     if (targetPass.status === 'valid') {
@@ -1013,6 +1071,8 @@ export default function App() {
         ...targetPass,
         status: 'used',
         checkedInAt: nowIso,
+        checkedInGate: gate,
+        checkedInBy: scannedBy,
         scanAttempts: 1,
       };
       setTicketPasses((prev) =>
@@ -1035,6 +1095,7 @@ export default function App() {
 
       return { outcome: 'valid_entry', pass: updatedPass };
     } else {
+      // Duplicate / Already Used
       const previousCheckIn = targetPass.checkedInAt;
       const updatedPass: EventTicketPass = {
         ...targetPass,
@@ -1054,9 +1115,9 @@ export default function App() {
         gate,
         scannedBy,
         result: 'duplicate_denied',
-        notes: `Tentative n°${updatedPass.scanAttempts} — Déjà scanné le ${
+        notes: `FRAUDE DOUBLON: Déjà émargé le ${
           previousCheckIn ? new Date(previousCheckIn).toLocaleTimeString('fr-FR') : ''
-        }`,
+        } (${targetPass.checkedInGate || 'Porte A'})`,
       };
       setAccessLogs((prev) => [logEntry, ...prev]);
 
@@ -1066,6 +1127,55 @@ export default function App() {
         previousCheckIn,
       };
     }
+  };
+
+  const handleBlacklistTicketPass = (passId: string, reason: string) => {
+    const nowIso = new Date().toISOString();
+    setTicketPasses((prev) =>
+      prev.map((p) =>
+        p.id === passId
+          ? {
+              ...p,
+              status: 'blacklisted',
+              blacklistReason: reason,
+              blacklistedAt: nowIso,
+            }
+          : p
+      )
+    );
+  };
+
+  const handleReactivateTicketPass = (passId: string) => {
+    setTicketPasses((prev) =>
+      prev.map((p) =>
+        p.id === passId
+          ? {
+              ...p,
+              status: 'valid',
+              blacklistReason: undefined,
+              blacklistedAt: undefined,
+            }
+          : p
+      )
+    );
+  };
+
+  const handleSyncOfflineScans = (scans: OfflineScanItem[]) => {
+    if (!scans || scans.length === 0) return;
+    const newLogs: AccessLogEntry[] = scans.map((s) => ({
+      id: `log-sync-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      timestamp: s.timestamp,
+      passCode: s.passCode,
+      holderName: 'Participant Hors-ligne',
+      eventTitle: 'Scan différé stade',
+      tierName: 'Vérifié localement',
+      gate: s.gate,
+      scannedBy: `${s.scannedBy} (Sync Hors-Ligne)`,
+      result: s.outcome === 'valid_entry' ? 'granted' : 'duplicate_denied',
+      notes: `Synchronisé depuis le tampon réseau hors-ligne du stade à ${new Date().toLocaleTimeString('fr-FR')}`,
+      offlineSynced: true,
+    }));
+    setAccessLogs((prev) => [...newLogs, ...prev]);
   };
 
   const handleRequestOrganizerPayout = (payload: {
@@ -1136,9 +1246,9 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
-      {/* Strictly Compliant 3-Zone Top Bar Contract */}
-      <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3.5">
+    <div className="min-h-screen flex flex-col bg-linear-to-b from-sky-50 via-sky-100/30 to-blue-50/50 text-slate-900">
+      {/* Strictly Compliant 3-Zone Top Bar Contract with Sky Blue & Crimson borders */}
+      <header className="sticky top-0 z-30 flex items-center justify-between border-b-2 border-sky-300 bg-white/95 backdrop-blur-xs px-6 py-3.5 shadow-2xs">
         {/* Zone 1: Single brand wordmark with KolaPass identity */}
         <div className="flex items-center gap-2.5">
           <a
@@ -1150,18 +1260,18 @@ export default function App() {
             }}
             className="flex items-center gap-2 text-lg font-bold tracking-tight text-slate-900 whitespace-nowrap"
           >
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-600 text-white font-mono text-sm shadow-2xs font-bold">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-rose-600 bg-rose-700 text-white font-mono text-sm shadow-xs font-bold">
               KP
             </span>
-            <span>KolaPass</span>
+            <span className="text-slate-950 font-black">KolaPass</span>
           </a>
-          <span className="hidden sm:inline-block rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 border border-emerald-200/60">
+          <span className="hidden sm:inline-block rounded-md border-2 border-sky-300 bg-sky-100 px-2 py-0.5 text-[11px] font-bold text-sky-900">
             Billetterie & Portique QR
           </span>
         </div>
 
         {/* Zone 2: Navigation directly controlling the Billetterie sections */}
-        <nav className="hidden md:flex items-center gap-5 text-xs font-medium text-slate-600">
+        <nav className="hidden md:flex items-center gap-5 text-xs font-semibold text-slate-600">
           {[
             { id: 'events', label: 'Événements & Vente' },
             { id: 'scanner', label: 'Portique Caméra', highlight: true },
@@ -1179,30 +1289,30 @@ export default function App() {
               }}
               className={`py-1 transition-colors whitespace-nowrap flex items-center gap-1.5 ${
                 activeTab === 'ticketing' && ticketingSubTab === item.id
-                  ? 'text-slate-900 font-semibold underline underline-offset-8 decoration-2 decoration-emerald-600'
-                  : 'hover:text-slate-900'
+                  ? 'text-rose-900 font-bold underline underline-offset-8 decoration-2 decoration-rose-600'
+                  : 'hover:text-slate-950'
               }`}
             >
               <span>{item.label}</span>
               {typeof item.count === 'number' && (
-                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-md bg-slate-100 text-slate-600">
+                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-md border border-sky-200 bg-sky-100 text-sky-800">
                   {item.count}
                 </span>
               )}
               {item.highlight && ticketingSubTab !== item.id && (
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="h-2 w-2 rounded-full bg-rose-600 animate-pulse" />
               )}
             </button>
           ))}
         </nav>
 
-        {/* Zone 3: Currency selector & Quick Scanner Launch */}
+        {/* Zone 3: Currency selector & Quick Scanner Launch & Role Badge */}
         <div className="flex items-center gap-2.5">
           <select
             aria-label="Choisir la devise d'affichage"
             value={displayCurrency}
             onChange={(e) => setDisplayCurrency(e.target.value as CurrencyCode)}
-            className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-mono font-semibold text-slate-800 focus:border-slate-900 focus:outline-none"
+            className="rounded-lg border-2 border-sky-300 bg-sky-50 px-3 py-1.5 text-xs font-mono font-bold text-slate-800 focus:border-rose-600 focus:outline-none"
           >
             <option value="USD">USD ($)</option>
             <option value="CDF">CDF (FC)</option>
@@ -1216,7 +1326,7 @@ export default function App() {
               setActiveTab('ticketing');
               setTicketingSubTab('scanner');
             }}
-            className="rounded-lg bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-emerald-700 transition-colors whitespace-nowrap shadow-2xs"
+            className="rounded-lg border-2 border-rose-600 bg-rose-700 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-rose-800 transition-colors whitespace-nowrap shadow-xs"
           >
             Scanner Caméra
           </button>
@@ -1224,7 +1334,7 @@ export default function App() {
       </header>
 
       {/* Mobile Navigation Bar for KolaPass */}
-      <div className="flex md:hidden items-center gap-2 overflow-x-auto border-b border-slate-200 bg-white px-4 py-2 text-xs">
+      <div className="flex md:hidden items-center gap-2 overflow-x-auto border-b-2 border-sky-300 bg-sky-50 px-4 py-2 text-xs">
         {[
           { id: 'events', label: 'Événements' },
           { id: 'scanner', label: 'Scanner QR' },
@@ -1240,10 +1350,10 @@ export default function App() {
               setActiveTab('ticketing');
               setTicketingSubTab(item.id as SubTab);
             }}
-            className={`rounded-md px-3 py-1.5 font-medium whitespace-nowrap ${
+            className={`rounded-md px-3 py-1.5 font-bold whitespace-nowrap border ${
               activeTab === 'ticketing' && ticketingSubTab === item.id
-                ? 'bg-slate-900 text-white'
-                : 'text-slate-600 hover:bg-slate-100'
+                ? 'border-rose-600 bg-rose-700 text-white'
+                : 'border-sky-200 bg-white text-slate-700 hover:bg-sky-100'
             }`}
           >
             {item.label}
@@ -1252,27 +1362,27 @@ export default function App() {
       </div>
 
       {/* Sub-header context bar dedicated to Billetterie & Portique */}
-      <div className="border-b border-slate-200 bg-white/70 px-6 py-2.5">
+      <div className="border-b border-sky-200 bg-sky-100/60 px-6 py-2">
         <div className="mx-auto max-w-[1400px] flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-slate-900">
-              KolaPass : Billetterie Événementielle & Portique Sécurisé QR
+          <div className="flex items-center gap-2 font-medium">
+            <span className="font-bold text-slate-900">
+              KolaPass Pro : Billetterie Événementielle & Portique Sécurisé QR
             </span>
             <span aria-hidden="true">·</span>
-            <span className="font-mono tabular-nums">
+            <span className="font-mono tabular-nums text-slate-700 font-bold">
               1 USD = {settings.rates.CDF.toLocaleString('fr-FR')} FC ={' '}
               {settings.rates.XOF.toLocaleString('fr-FR')} FCFA
             </span>
             <span aria-hidden="true">·</span>
-            <span className="text-emerald-700 font-medium">Commission plateforme : 7,0%</span>
+            <span className="text-rose-800 font-bold">Commission : 7,0%</span>
           </div>
 
-          <div className="flex items-center gap-3 text-slate-500 font-mono text-[11px]">
-            <span>{events.length} événement(s) actif(s)</span>
+          <div className="flex items-center gap-3 text-slate-600 font-mono text-[11px] font-semibold">
+            <span>{events.length} événement(s)</span>
             <span>·</span>
             <span>{ticketPasses.length} pass émis</span>
             <span>·</span>
-            <span>{accessLogs.length} scan(s) audité(s)</span>
+            <span>{accessLogs.length} scan(s)</span>
           </div>
         </div>
       </div>
@@ -1294,6 +1404,11 @@ export default function App() {
             onClearAccessLogs={() => setAccessLogs([])}
             activeSubTab={ticketingSubTab}
             onSubTabChange={setTicketingSubTab}
+            currentUserSession={userSession}
+            onUpdateUserSession={setUserSession}
+            onBlacklistPass={handleBlacklistTicketPass}
+            onReactivatePass={handleReactivateTicketPass}
+            onSyncOfflineScans={handleSyncOfflineScans}
           />
         )}
 

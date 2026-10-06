@@ -290,10 +290,27 @@ export interface TicketingEvent {
   createdAt: string;
 }
 
+export type UserRole = 'admin' | 'organizer' | 'agent';
+
+export interface UserSession {
+  id: string;
+  name: string;
+  phone: string;
+  role: UserRole;
+  token: string;
+  twoFactorVerified: boolean;
+  avatarUrl: string;
+  assignedGate?: string;
+  assignedEventId?: string;
+}
+
 export interface EventTicketPass {
   id: string;
-  passCode: string;
+  passCode: string; // e.g. EVT123-8F3K9X2Q
   qrSignature: string;
+  jwtToken?: string;
+  qrPayload?: string;
+  avatarUrl?: string;
   eventId: string;
   eventTitle: string;
   eventDate: string;
@@ -301,12 +318,18 @@ export interface EventTicketPass {
   tierName: 'Standard' | 'VIP' | 'VVIP';
   holderName: string;
   holderPhone: string;
+  holderEmail?: string;
   pricePaidUSD: number;
   platformFeeUSD: number;
   netOrganizerUSD: number;
   paymentRail: FintechRail;
-  status: 'valid' | 'used' | 'cancelled';
+  transactionReference?: string;
+  status: 'valid' | 'used' | 'blacklisted' | 'cancelled';
+  blacklistReason?: string;
+  blacklistedAt?: string;
   checkedInAt?: string;
+  checkedInGate?: string;
+  checkedInBy?: string;
   scanAttempts: number;
   purchasedAt: string;
 }
@@ -320,8 +343,32 @@ export interface AccessLogEntry {
   tierName: string;
   gate: string;
   scannedBy: string;
-  result: 'granted' | 'duplicate_denied' | 'invalid_unknown';
+  result: 'granted' | 'duplicate_denied' | 'invalid_unknown' | 'blacklisted_denied';
   notes?: string;
+  offlineSynced?: boolean;
+}
+
+export interface OfflineScanItem {
+  id: string;
+  timestamp: string;
+  passCode: string;
+  gate: string;
+  scannedBy: string;
+  scannedAtOffline: string;
+  outcome: 'valid_entry' | 'fraud_duplicate' | 'not_found' | 'blacklisted';
+}
+
+export interface NotificationRecord {
+  id: string;
+  recipientPhone: string;
+  recipientEmail?: string;
+  recipientName: string;
+  passCode: string;
+  eventTitle: string;
+  channel: 'whatsapp' | 'email' | 'sms';
+  status: 'sent' | 'delivered';
+  messageBody: string;
+  sentAt: string;
 }
 
 export interface OrganizerPayout {
