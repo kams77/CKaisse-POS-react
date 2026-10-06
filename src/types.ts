@@ -332,6 +332,37 @@ export interface EventTicketPass {
   checkedInBy?: string;
   scanAttempts: number;
   purchasedAt: string;
+  // Plage de billets (Lot organisateur)
+  batchId?: string;
+  batchNumber?: string;
+  batchName?: string;
+  rangeIndex?: number;
+  rangeTotal?: number;
+  isBatchTicket?: boolean;
+  distributorName?: string;
+}
+
+export interface TicketBatchRange {
+  id: string;
+  batchNumber: string;
+  name: string;
+  eventId: string;
+  eventTitle: string;
+  tierName: 'Standard' | 'VIP' | 'VVIP';
+  unitPriceUSD: number;
+  startNumber: number;
+  endNumber: number;
+  quantity: number;
+  prefix: string;
+  generatedBy: string;
+  distributorName?: string;
+  distributorPhone?: string;
+  totalValueUSD: number;
+  status: 'active' | 'archived' | 'exhausted';
+  notes?: string;
+  generatedAt: string;
+  passIds: string[];
+  scannedCount: number;
 }
 
 export interface AccessLogEntry {

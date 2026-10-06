@@ -27,6 +27,7 @@ import {
   StockMovement,
   StoreSettings,
   TicketingEvent,
+  TicketBatchRange,
   UserRole,
   UserSession,
   OfflineScanItem,
@@ -46,6 +47,7 @@ import {
   INITIAL_SALES,
   INITIAL_SETTINGS,
   INITIAL_STOCK_MOVEMENTS,
+  INITIAL_TICKET_BATCHES,
   INITIAL_TICKET_PASSES,
   INITIAL_USER_SESSIONS,
 } from './data/initialData';
@@ -89,6 +91,7 @@ const STORAGE_KEYS = {
   fintechTx: 'kolapay_transactions_v1',
   payouts: 'kolapay_payouts_v1',
   events: 'kolapass_events_v1',
+  ticketBatches: 'kolapass_ticket_batches_v1',
   ticketPasses: 'kolapass_passes_v1',
   accessLogs: 'kolapass_access_logs_v1',
   organizerPayouts: 'kolapass_org_payouts_v1',
@@ -160,6 +163,9 @@ export default function App() {
   // Project 3 State (KolaPass Ticketing & QR Access Control)
   const [events, setEvents] = useState<TicketingEvent[]>(() =>
     loadFromStorage(STORAGE_KEYS.events, INITIAL_EVENTS)
+  );
+  const [ticketBatches, setTicketBatches] = useState<TicketBatchRange[]>(() =>
+    loadFromStorage(STORAGE_KEYS.ticketBatches, INITIAL_TICKET_BATCHES)
   );
   const [ticketPasses, setTicketPasses] = useState<EventTicketPass[]>(() =>
     loadFromStorage(STORAGE_KEYS.ticketPasses, INITIAL_TICKET_PASSES)
@@ -286,6 +292,17 @@ export default function App() {
       // ignore
     }
   }, [events]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        STORAGE_KEYS.ticketBatches,
+        JSON.stringify(ticketBatches)
+      );
+    } catch {
+      // ignore
+    }
+  }, [ticketBatches]);
 
   useEffect(() => {
     try {
@@ -1011,6 +1028,142 @@ export default function App() {
     return createdPasses;
   };
 
+  const handleGenerateTicketBatch = (payload: {
+    eventId: string;
+    tierName: 'Standard' | 'VIP' | 'VVIP';
+    name: string;
+    prefix: string;
+    startNumber: number;
+    endNumber: number;
+    unitPriceUSD: number;
+    generatedBy: string;
+    distributorName?: string;
+    distributorPhone?: string;
+    notes?: string;
+  }): { batch: TicketBatchRange; passes: EventTicketPass[] } => {
+    const targetEvent = events.find((e) => e.id === payload.eventId);
+    if (!targetEvent) throw new Error('Événement introuvable.');
+
+    const tier = targetEvent.tiers.find((t) => t.name === payload.tierName);
+    if (!tier) throw new Error(`Catégorie ${payload.tierName} introuvable.`);
+
+    const quantity = payload.endNumber - payload.startNumber + 1;
+    if (quantity <= 0) throw new Error('La plage de numéros est invalide.');
+
+    const available = tier.capacity - tier.sold;
+    if (quantity > available) {
+      throw new Error(
+        `Capacité insuffisante : seulement ${available} places disponibles sur cette catégorie.`
+      );
+    }
+
+    const unitPrice = payload.unitPriceUSD > 0 ? payload.unitPriceUSD : tier.priceUSD;
+    const batchId = `batch-${Date.now()}`;
+    const batchNumber = `PLG-${new Date().getFullYear()}-${String(ticketBatches.length + 1).padStart(3, '0')}`;
+    const cleanPrefix = payload.prefix.trim().toUpperCase() || 'PLG';
+    const totalValueUSD = quantity * unitPrice;
+    const nowIso = new Date().toISOString();
+
+    const createdPasses: EventTicketPass[] = [];
+    const passIds: string[] = [];
+
+    for (let num = payload.startNumber; num <= payload.endNumber; num++) {
+      const passId = `pass-${batchId}-${num}`;
+      passIds.push(passId);
+      const passCode = `${cleanPrefix}-${String(num).padStart(4, '0')}`;
+
+      const { jwtToken, signature, fullQrData } = generateTicketJwt({
+        jti: `tkt-${batchId}-${num}`,
+        evt: targetEvent.id,
+        evtTitle: targetEvent.title,
+        tier: payload.tierName,
+        name: `${payload.distributorName || 'Porteur Billet'} (N° ${num}/${quantity})`,
+        phone: payload.distributorPhone || targetEvent.organizerPhone,
+        code: passCode,
+      });
+
+      const feeUSD = Number((unitPrice * ((targetEvent.commissionRatePercent || 10) / 100)).toFixed(2));
+      const netUSD = Number((unitPrice - feeUSD).toFixed(2));
+
+      const newPass: EventTicketPass = {
+        id: passId,
+        passCode,
+        qrSignature: `HMAC-SHA256:${signature}`,
+        jwtToken,
+        qrPayload: fullQrData,
+        avatarUrl: `https://images.unsplash.com/photo-${1534528741775 + (num % 20) * 100}?w=150&auto=format&fit=crop&q=80`,
+        eventId: targetEvent.id,
+        eventTitle: targetEvent.title,
+        eventDate: targetEvent.eventDate,
+        venue: targetEvent.venue,
+        tierName: payload.tierName,
+        holderName: `${payload.distributorName || 'Porteur Billet'} (N° ${num}/${quantity})`,
+        holderPhone: payload.distributorPhone || targetEvent.organizerPhone,
+        pricePaidUSD: unitPrice,
+        platformFeeUSD: feeUSD,
+        netOrganizerUSD: netUSD,
+        paymentRail: 'Wave',
+        transactionReference: `${batchNumber}-N${num}`,
+        status: 'valid',
+        scanAttempts: 0,
+        purchasedAt: nowIso,
+        batchId,
+        batchNumber,
+        batchName: payload.name,
+        rangeIndex: num,
+        rangeTotal: quantity,
+        isBatchTicket: true,
+        distributorName: payload.distributorName,
+      };
+
+      createdPasses.push(newPass);
+    }
+
+    const newBatch: TicketBatchRange = {
+      id: batchId,
+      batchNumber,
+      name: payload.name,
+      eventId: targetEvent.id,
+      eventTitle: targetEvent.title,
+      tierName: payload.tierName,
+      unitPriceUSD: unitPrice,
+      startNumber: payload.startNumber,
+      endNumber: payload.endNumber,
+      quantity,
+      prefix: cleanPrefix,
+      generatedBy: payload.generatedBy,
+      distributorName: payload.distributorName,
+      distributorPhone: payload.distributorPhone,
+      totalValueUSD,
+      status: 'active',
+      notes: payload.notes,
+      generatedAt: nowIso,
+      passIds,
+      scannedCount: 0,
+    };
+
+    // 1. Décompte de la capacité et comptabilisation VENDUE au Dashboard
+    setEvents((prev) =>
+      prev.map((ev) => {
+        if (ev.id !== targetEvent.id) return ev;
+        return {
+          ...ev,
+          tiers: ev.tiers.map((t) =>
+            t.name === payload.tierName ? { ...t, sold: t.sold + quantity } : t
+          ),
+        };
+      })
+    );
+
+    // 2. Enregistrement des billets générés
+    setTicketPasses((prev) => [...createdPasses, ...prev]);
+
+    // 3. Enregistrement de la plage
+    setTicketBatches((prev) => [newBatch, ...prev]);
+
+    return { batch: newBatch, passes: createdPasses };
+  };
+
   const handleScanTicketPass = (
     passCode: string,
     gate: string = 'Porte A (VIP / VVIP)',
@@ -1083,6 +1236,21 @@ export default function App() {
         prev.map((p) => (p.id === targetPass.id ? updatedPass : p))
       );
 
+      // Si le billet fait partie d'une plage, incrémenter le compteur de la plage
+      if (targetPass.batchId) {
+        setTicketBatches((prev) =>
+          prev.map((b) =>
+            b.id === targetPass.batchId
+              ? { ...b, scannedCount: (b.scannedCount || 0) + 1 }
+              : b
+          )
+        );
+      }
+
+      const batchNote = targetPass.batchName
+        ? ` (Billet #${targetPass.rangeIndex || 'N/A'} de la plage "${targetPass.batchName}")`
+        : '';
+
       const logEntry: AccessLogEntry = {
         id: `log-${Date.now()}`,
         timestamp: nowIso,
@@ -1093,7 +1261,7 @@ export default function App() {
         gate,
         scannedBy,
         result: 'granted',
-        notes: `Entrée autorisée — Pass ${targetPass.tierName}`,
+        notes: `Entrée autorisée — Pass ${targetPass.tierName}${batchNote}`,
       };
       setAccessLogs((prev) => [logEntry, ...prev]);
 
@@ -1109,6 +1277,10 @@ export default function App() {
         prev.map((p) => (p.id === targetPass.id ? updatedPass : p))
       );
 
+      const batchNote = targetPass.batchName
+        ? ` [Plage: ${targetPass.batchName} N°#${targetPass.rangeIndex || 'N/A'}]`
+        : '';
+
       const logEntry: AccessLogEntry = {
         id: `log-${Date.now()}`,
         timestamp: nowIso,
@@ -1121,7 +1293,7 @@ export default function App() {
         result: 'duplicate_denied',
         notes: `FRAUDE DOUBLON: Déjà émargé le ${
           previousCheckIn ? new Date(previousCheckIn).toLocaleTimeString('fr-FR') : ''
-        } (${targetPass.checkedInGate || 'Porte A'})`,
+        } (${targetPass.checkedInGate || 'Porte A'})${batchNote}`,
       };
       setAccessLogs((prev) => [logEntry, ...prev]);
 
@@ -1278,6 +1450,7 @@ export default function App() {
         <nav className="hidden lg:flex items-center gap-1.5 rounded-2xl border-2 border-slate-300 bg-slate-100 p-1.5 shadow-2xs">
           {[
             { id: 'events', label: 'Événements & Vente' },
+            { id: 'batches', label: 'Plages de Billets', count: ticketBatches.length, highlight: true },
             { id: 'scanner', label: 'Portique Caméra', highlight: true },
             { id: 'passes', label: 'Billets & Pass', count: ticketPasses.length },
             { id: 'logs', label: 'Journal des Scans', count: accessLogs.length },
@@ -1366,6 +1539,7 @@ export default function App() {
       <div className="flex lg:hidden items-center gap-1.5 overflow-x-auto border-b-2 border-slate-300 bg-slate-100 p-2 text-xs">
         {[
           { id: 'events', label: 'Événements' },
+          { id: 'batches', label: `Plages (${ticketBatches.length})` },
           { id: 'buyer', label: '👁️ Démo Acheteur' },
           { id: 'scanner', label: 'Scanner QR' },
           { id: 'passes', label: `Billets (${ticketPasses.length})` },
@@ -1413,6 +1587,8 @@ export default function App() {
           <div className="flex items-center gap-3 text-slate-600 font-mono text-[11px] font-semibold">
             <span>{events.length} événement(s)</span>
             <span>·</span>
+            <span>{ticketBatches.length} plage(s)</span>
+            <span>·</span>
             <span>{ticketPasses.length} pass émis</span>
             <span>·</span>
             <span>{accessLogs.length} scan(s)</span>
@@ -1426,12 +1602,14 @@ export default function App() {
           <TicketingProjectView
             events={events}
             passes={ticketPasses}
+            batches={ticketBatches}
             accessLogs={accessLogs}
             organizerPayouts={organizerPayouts}
             displayCurrency={displayCurrency}
             settings={settings}
             onCreateEvent={handleCreateEvent}
             onPurchaseTicketPasses={handlePurchaseTicketPass}
+            onGenerateBatch={handleGenerateTicketBatch}
             onScanTicketPass={handleScanTicketPass}
             onRequestOrganizerPayout={handleRequestOrganizerPayout}
             onClearAccessLogs={() => setAccessLogs([])}

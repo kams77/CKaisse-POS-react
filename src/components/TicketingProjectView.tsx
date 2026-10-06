@@ -47,6 +47,8 @@ import {
   Wifi,
   WifiOff,
   X,
+  Barcode,
+  Scissors,
 } from 'lucide-react';
 import {
   AccessLogEntry,
@@ -57,6 +59,7 @@ import {
   OfflineScanItem,
   OrganizerPayout,
   StoreSettings,
+  TicketBatchRange,
   TicketingEvent,
   UserRole,
   UserSession,
@@ -71,10 +74,13 @@ import { SvgQrCode } from './SvgQrCode';
 import { AuthRoleModal } from './AuthRoleModal';
 import { TicketPassDetailModal } from './TicketPassDetailModal';
 import { BuyerPortalView } from './BuyerPortalView';
+import { TicketBatchModal } from './TicketBatchModal';
+import { TicketBatchPrintModal } from './TicketBatchPrintModal';
 import { INITIAL_USER_SESSIONS } from '../data/initialData';
 
 export type SubTab =
   | 'events'
+  | 'batches'
   | 'passes'
   | 'scanner'
   | 'logs'
@@ -85,6 +91,7 @@ export type SubTab =
 interface TicketingProjectViewProps {
   events: TicketingEvent[];
   passes: EventTicketPass[];
+  batches?: TicketBatchRange[];
   accessLogs: AccessLogEntry[];
   organizerPayouts: OrganizerPayout[];
   displayCurrency: CurrencyCode;
@@ -115,6 +122,19 @@ interface TicketingProjectViewProps {
     discountPercent?: number;
     guestNames?: string[];
   }) => EventTicketPass[];
+  onGenerateBatch?: (payload: {
+    eventId: string;
+    tierName: 'Standard' | 'VIP' | 'VVIP';
+    name: string;
+    prefix: string;
+    startNumber: number;
+    endNumber: number;
+    unitPriceUSD: number;
+    generatedBy: string;
+    distributorName?: string;
+    distributorPhone?: string;
+    notes?: string;
+  }) => { batch: TicketBatchRange; passes: EventTicketPass[] };
   onScanTicketPass: (
     passCode: string,
     gate?: string,
@@ -179,9 +199,11 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
   settings,
   onCreateEvent,
   onPurchaseTicketPasses,
+  onGenerateBatch,
   onScanTicketPass,
   onRequestOrganizerPayout,
   onClearAccessLogs,
+  batches = [],
   activeSubTab,
   onSubTabChange,
   currentUserSession = INITIAL_USER_SESSIONS.admin,
@@ -204,6 +226,16 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
   // Offline Mode (Stade sans réseau)
   const [isOfflineMode, setIsOfflineMode] = useState(false);
   const [offlineScansQueue, setOfflineScansQueue] = useState<OfflineScanItem[]>([]);
+
+  // Batch Ranges Modal State
+  const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
+  const [batchModalMode, setBatchModalMode] = useState<'create' | 'view'>('create');
+  const [batchModalEventId, setBatchModalEventId] = useState<string>('');
+  const [inspectingBatch, setInspectingBatch] = useState<TicketBatchRange | null>(null);
+  const [isPrintBatchModalOpen, setIsPrintBatchModalOpen] = useState(false);
+  const [printingBatch, setPrintingBatch] = useState<TicketBatchRange | null>(null);
+  const [batchSearch, setBatchSearch] = useState('');
+  const [batchEventFilter, setBatchEventFilter] = useState('all');
 
   // Create Event Modal state
   const [isCreateEventOpen, setIsCreateEventOpen] = useState(false);
@@ -259,7 +291,9 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
   // Passes search & filters
   const [passSearch, setPassSearch] = useState('');
   const [passEventFilter, setPassEventFilter] = useState('all');
-  const [passStatusFilter, setPassStatusFilter] = useState<'all' | 'valid' | 'used' | 'blacklisted'>('all');
+  const [passStatusFilter, setPassStatusFilter] = useState<
+    'all' | 'valid' | 'used' | 'blacklisted' | 'batch'
+  >('all');
 
   // Logs search & filters
   const [logSearch, setLogSearch] = useState('');
@@ -291,6 +325,10 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
     const blacklistedPassesCount = passes.filter((p) => p.status === 'blacklisted').length;
     const totalOrganizerPayoutsUSD = organizerPayouts.reduce((acc, p) => acc + p.amountUSD, 0);
 
+    const totalBatchPlacesSold = batches.reduce((acc, b) => acc + b.quantity, 0);
+    const totalBatchPlacesScanned = batches.reduce((acc, b) => acc + (b.scannedCount || 0), 0);
+    const totalBatchValueUSD = batches.reduce((acc, b) => acc + (b.totalValueUSD || 0), 0);
+
     return {
       totalTicketsSold,
       totalGrossUSD,
@@ -298,8 +336,11 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
       checkedInPassesCount,
       blacklistedPassesCount,
       totalOrganizerPayoutsUSD,
+      totalBatchPlacesSold,
+      totalBatchPlacesScanned,
+      totalBatchValueUSD,
     };
-  }, [events, passes, organizerPayouts]);
+  }, [events, passes, organizerPayouts, batches]);
 
   // Handle Event Creation
   const handleCreateEventSubmit = (e: React.FormEvent) => {
@@ -474,7 +515,12 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
         p.tierName.toLowerCase().includes(q);
 
       const matchesEvent = passEventFilter === 'all' || p.eventId === passEventFilter;
-      const matchesStatus = passStatusFilter === 'all' || p.status === passStatusFilter;
+      const matchesStatus =
+        passStatusFilter === 'all'
+          ? true
+          : passStatusFilter === 'batch'
+          ? Boolean(p.isBatchTicket)
+          : p.status === passStatusFilter;
 
       return matchesQuery && matchesEvent && matchesStatus;
     });
@@ -643,6 +689,21 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
               <span>Créer Événement</span>
             </button>
 
+            {/* Generate Batch Button (Plage de Billets) */}
+            <button
+              type="button"
+              onClick={() => {
+                setBatchModalMode('create');
+                setBatchModalEventId(events[0]?.id || '');
+                setIsBatchModalOpen(true);
+              }}
+              className="inline-flex items-center gap-1.5 rounded-xl border-2 border-purple-600 bg-purple-700 px-3.5 py-2 text-xs font-bold text-white hover:bg-purple-800 transition-colors shadow-xs"
+              title="Émettre une plage / série de billets physiques ou guichet comptabilisés comme vendus"
+            >
+              <Layers className="h-4 w-4" />
+              <span>+ Plage de Billets</span>
+            </button>
+
             {/* Sound Toggle */}
             <button
               type="button"
@@ -678,16 +739,81 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
           </div>
         )}
 
+        {/* SIGNALEMENT SYSTÈME ADMIN : PLAGES DE BILLETS ÉMISES & PLACES COMPTABILISÉES VENDUES */}
+        <div className="mt-4 rounded-2xl border-2 border-purple-300 bg-gradient-to-r from-purple-50 via-white to-sky-50 p-4 shadow-2xs">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl border-2 border-purple-400 bg-purple-600 text-white shadow-xs shrink-0 mt-0.5">
+                <Layers className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="rounded-md border border-purple-400 bg-purple-100 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-purple-900 font-mono">
+                    📡 Signalement Système Admin
+                  </span>
+                  <span className="text-xs font-black text-slate-900">
+                    {batches.length} Plage(s) de Billets Émise(s) & Actives
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-slate-600 leading-snug">
+                  Les billets générés par plage/lot sont <strong>enregistrés et comptabilisés comme places vendues</strong>{' '}
+                  au Dashboard de l&apos;événement, et chaque billet individuel est <strong>vérifiable au scanner avant l&apos;entrée</strong>.
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2.5 text-xs font-mono">
+                  <span className="rounded-lg border border-purple-200 bg-white px-2.5 py-1 text-purple-900 font-bold">
+                    🎟️ <strong>{metrics.totalBatchPlacesSold}</strong> places vendues en plages
+                  </span>
+                  <span className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-emerald-800 font-bold">
+                    ✓ <strong>{metrics.totalBatchPlacesScanned}</strong> scannées au portique (
+                    {metrics.totalBatchPlacesSold > 0
+                      ? Math.round((metrics.totalBatchPlacesScanned / metrics.totalBatchPlacesSold) * 100)
+                      : 0}
+                    %)
+                  </span>
+                  <span className="rounded-lg border border-sky-200 bg-white px-2.5 py-1 text-sky-900 font-bold">
+                    💰 Valeur : <strong>{formatMoney(metrics.totalBatchValueUSD, displayCurrency, settings.rates)}</strong>
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setBatchModalMode('create');
+                  setBatchModalEventId(events[0]?.id || '');
+                  setIsBatchModalOpen(true);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-xl border-2 border-purple-600 bg-purple-700 px-3.5 py-2 text-xs font-bold text-white hover:bg-purple-800 transition-colors shadow-xs"
+              >
+                <Plus className="h-4 w-4" />
+                <span>Générer Plage</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSubTab('batches')}
+                className="inline-flex items-center gap-1.5 rounded-xl border-2 border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-800 hover:border-slate-800 hover:bg-slate-100 transition-colors shadow-2xs"
+              >
+                <Eye className="h-4 w-4 text-slate-500" />
+                <span>Gérer Lots ({batches.length})</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
         {/* Crisp Subtab Navigation - Gray Buttons */}
         <div className="mt-5 border-t-2 border-slate-200 pt-4 flex flex-wrap items-center gap-2 rounded-2xl border-2 border-slate-300 bg-slate-100 p-2">
           {[
             { id: 'events', label: '1. Événements & Vente', count: events.length },
-            { id: 'scanner', label: '2. Portique Caméra (Entrée)', highlight: true },
-            { id: 'passes', label: '3. Billets & Pass Émis', count: passes.length },
-            { id: 'logs', label: '4. Journal des Scans (Audit)', count: accessLogs.length },
-            { id: 'organizers', label: '5. Reversements Promoteurs' },
-            { id: 'monetization', label: '6. Rentabilité (10%)' },
-            { id: 'buyer', label: '7. 👁️ Démo Acheteur Public', highlight: true },
+            { id: 'batches', label: '2. Plages de Billets (Lots)', count: batches.length, highlight: true },
+            { id: 'scanner', label: '3. Portique Caméra (Entrée)', highlight: true },
+            { id: 'passes', label: '4. Billets & Pass Émis', count: passes.length },
+            { id: 'logs', label: '5. Journal des Scans (Audit)', count: accessLogs.length },
+            { id: 'organizers', label: '6. Reversements Promoteurs' },
+            { id: 'monetization', label: '7. Rentabilité (10%)' },
+            { id: 'buyer', label: '8. 👁️ Démo Acheteur Public', highlight: true },
           ].map((tab) => {
             const isActive = subTab === tab.id;
             return (
@@ -720,7 +846,7 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
         </div>
       </div>
 
-      {/* 4 Crisp Metric Cards with Sky-Blue & Crimson Highlights */}
+      {/* 4 Crisp Metric Cards with Sky-Blue, Purple & Crimson Highlights */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="rounded-2xl border-2 border-sky-300 bg-white p-5 shadow-xs">
           <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
@@ -731,6 +857,11 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
           </div>
           <p className="mt-1 text-xs text-slate-500 font-mono">
             {metrics.totalTicketsSold.toLocaleString('fr-FR')} billet(s) écoulé(s)
+            {metrics.totalBatchPlacesSold > 0 && (
+              <span className="text-purple-700 font-bold block sm:inline sm:ml-1">
+                (dont {metrics.totalBatchPlacesSold} en plages guichet)
+              </span>
+            )}
           </p>
         </div>
 
@@ -742,7 +873,7 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
             +{formatMoney(metrics.totalCommissionUSD, displayCurrency, settings.rates)}
           </div>
           <p className="mt-1 text-xs text-slate-500">
-            Prélèvement automatique à chaque vente Mobile Money
+            Prélèvement automatique à chaque vente Mobile Money & lot guichet
           </p>
         </div>
 
@@ -759,6 +890,11 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
               ? Math.round((metrics.checkedInPassesCount / passes.length) * 100)
               : 0}
             %
+            {metrics.totalBatchPlacesScanned > 0 && (
+              <span className="text-purple-700 font-bold block sm:inline sm:ml-1">
+                · {metrics.totalBatchPlacesScanned} issu(s) de plages
+              </span>
+            )}
           </p>
         </div>
 
@@ -948,6 +1084,19 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
 
                     <button
                       type="button"
+                      onClick={() => {
+                        setBatchModalMode('create');
+                        setBatchModalEventId(ev.id);
+                        setIsBatchModalOpen(true);
+                      }}
+                      className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl border-2 border-purple-300 bg-purple-50 py-2 px-3 text-xs font-bold text-purple-950 hover:bg-purple-100 hover:border-purple-400 transition-colors shadow-2xs"
+                    >
+                      <Layers className="h-3.5 w-3.5 text-purple-700" />
+                      <span>🏷️ Générer une Plage de Billets (Guichet / Lot)</span>
+                    </button>
+
+                    <button
+                      type="button"
                       onClick={() => setSubTab('buyer')}
                       className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl border-2 border-slate-300 bg-white py-2 px-3 text-xs font-bold text-slate-700 hover:border-slate-800 hover:bg-slate-100 transition-colors shadow-2xs"
                     >
@@ -962,7 +1111,294 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
         </div>
       )}
 
-      {/* SUBTAB 2: SCANNER & CHECK-IN (CAMERA / OFFLINE STADIUM APP) */}
+      {/* SUBTAB 2: PLAGES DE BILLETS (LOTS GUICHET & PARTENAIRES) */}
+      {subTab === 'batches' && (
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b-2 border-purple-200 pb-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <Layers className="h-5 w-5 text-purple-700" />
+                <h2 className="text-base font-extrabold text-slate-900">
+                  Gestion & Traçabilité des Plages de Billets (Lots Guichet & Partenaires)
+                </h2>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Chaque plage générée est enregistrée au Dashboard comme places vendues et chaque billet individuel est vérifiable au scanner avant l&apos;entrée.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setBatchModalMode('create');
+                  setBatchModalEventId(events[0]?.id || '');
+                  setIsBatchModalOpen(true);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-xl border-2 border-purple-600 bg-purple-700 px-3.5 py-2 text-xs font-bold text-white hover:bg-purple-800 transition-colors shadow-xs"
+              >
+                <Plus className="h-4 w-4" />
+                <span>+ Nouvelle Plage de Billets</span>
+              </button>
+            </div>
+          </div>
+
+          {/* 4 Summary Stats Cards for Batches */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="rounded-2xl border-2 border-purple-300 bg-white p-4 shadow-2xs">
+              <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-purple-800">
+                Plages Émises & Actives
+              </span>
+              <div className="mt-1 text-2xl font-black text-slate-900 font-mono">
+                {batches.length}
+              </div>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Lots de distribution physique
+              </p>
+            </div>
+
+            <div className="rounded-2xl border-2 border-purple-300 bg-white p-4 shadow-2xs">
+              <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-purple-800">
+                Places Comptabilisées Vendues
+              </span>
+              <div className="mt-1 text-2xl font-black text-purple-900 font-mono">
+                {metrics.totalBatchPlacesSold.toLocaleString('fr-FR')}
+              </div>
+              <p className="text-[11px] text-purple-700 mt-0.5">
+                Intégrées aux recettes de l&apos;événement
+              </p>
+            </div>
+
+            <div className="rounded-2xl border-2 border-emerald-300 bg-white p-4 shadow-2xs">
+              <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-emerald-800">
+                Billets Scannés au Portique
+              </span>
+              <div className="mt-1 text-2xl font-black text-emerald-700 font-mono">
+                {metrics.totalBatchPlacesScanned} / {metrics.totalBatchPlacesSold}
+              </div>
+              <p className="text-[11px] text-emerald-700 mt-0.5">
+                Taux de présence :{' '}
+                {metrics.totalBatchPlacesSold > 0
+                  ? Math.round((metrics.totalBatchPlacesScanned / metrics.totalBatchPlacesSold) * 100)
+                  : 0}
+                %
+              </p>
+            </div>
+
+            <div className="rounded-2xl border-2 border-sky-300 bg-white p-4 shadow-2xs">
+              <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-slate-500">
+                Valeur Totale Comptabilisée
+              </span>
+              <div className="mt-1 text-2xl font-black text-slate-900 font-mono">
+                {formatMoney(metrics.totalBatchValueUSD, displayCurrency, settings.rates)}
+              </div>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Équivalent double-devise
+              </p>
+            </div>
+          </div>
+
+          {/* Search & Event Filter */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+            <div className="relative">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+              <input
+                type="text"
+                value={batchSearch}
+                onChange={(e) => setBatchSearch(e.target.value)}
+                placeholder="Rechercher par nom de lot, code, distributeur..."
+                className="w-full rounded-xl border-2 border-purple-200 bg-white pl-9 pr-3 py-2 text-xs font-medium text-slate-900 focus:border-purple-600 focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <select
+                value={batchEventFilter}
+                onChange={(e) => setBatchEventFilter(e.target.value)}
+                className="w-full rounded-xl border-2 border-purple-200 bg-white px-3 py-2 text-xs font-bold text-slate-800 focus:border-purple-600 focus:outline-none"
+              >
+                <option value="all">Tous les événements</option>
+                {events.map((ev) => (
+                  <option key={ev.id} value={ev.id}>
+                    {ev.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Batches Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {batches
+              .filter((b) => {
+                if (batchEventFilter !== 'all' && b.eventId !== batchEventFilter) return false;
+                if (batchSearch.trim()) {
+                  const q = batchSearch.toLowerCase();
+                  return (
+                    b.name.toLowerCase().includes(q) ||
+                    b.batchNumber.toLowerCase().includes(q) ||
+                    b.eventTitle.toLowerCase().includes(q) ||
+                    (b.distributorName && b.distributorName.toLowerCase().includes(q))
+                  );
+                }
+                return true;
+              })
+              .map((b) => {
+                const scanPercent =
+                  b.quantity > 0 ? Math.round((b.scannedCount / b.quantity) * 100) : 0;
+                const matchingPasses = passes.filter((p) => p.batchId === b.id);
+                const nextPassToScan = matchingPasses.find((p) => p.status === 'valid') || matchingPasses[0];
+
+                return (
+                  <div
+                    key={b.id}
+                    className="rounded-2xl border-2 border-purple-300 bg-white overflow-hidden shadow-xs hover:border-purple-400 hover:shadow-md transition-all flex flex-col justify-between"
+                  >
+                    <div className="p-5 space-y-4">
+                      {/* Header Badge & Number */}
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="rounded-md border border-purple-400 bg-purple-100 px-2 py-0.5 text-[10px] font-mono font-bold text-purple-900 uppercase">
+                              {b.batchNumber}
+                            </span>
+                            <span
+                              className={`rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                                b.tierName === 'VVIP'
+                                  ? 'border-amber-400 bg-amber-50 text-amber-900'
+                                  : b.tierName === 'VIP'
+                                  ? 'border-rose-300 bg-rose-50 text-rose-800'
+                                  : 'border-sky-300 bg-sky-50 text-sky-800'
+                              }`}
+                            >
+                              Catégorie {b.tierName}
+                            </span>
+                            <span className="rounded-md border border-emerald-300 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800 font-mono">
+                              ✓ Vendu
+                            </span>
+                          </div>
+                          <h3 className="text-base font-bold text-slate-900 leading-snug mt-1">
+                            {b.name}
+                          </h3>
+                        </div>
+
+                        <div className="flex flex-col items-center justify-center rounded-xl border-2 border-purple-200 bg-purple-50 px-2.5 py-1 font-mono text-center shrink-0">
+                          <span className="text-base font-black text-purple-900 leading-none">
+                            {b.quantity}
+                          </span>
+                          <span className="text-[10px] font-bold text-slate-500 uppercase leading-tight mt-0.5">
+                            Places
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Event Details */}
+                      <div className="space-y-1.5 text-xs text-slate-600 font-medium">
+                        <div className="flex items-center gap-1.5">
+                          <Calendar className="h-3.5 w-3.5 text-sky-600 shrink-0" />
+                          <span className="truncate font-semibold text-slate-800">
+                            {b.eventTitle}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 font-mono text-slate-600">
+                          <Barcode className="h-3.5 w-3.5 text-purple-600 shrink-0" />
+                          <span>
+                            Plage : <strong>N° {b.startNumber}</strong> à <strong>N° {b.endNumber}</strong> (Préfixe : {b.prefix})
+                          </span>
+                        </div>
+                        {b.distributorName && (
+                          <div className="flex items-center gap-1.5">
+                            <Building2 className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                            <span className="truncate">
+                              Distributeur : {b.distributorName}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Real-time Scan Progress Bar */}
+                      <div className="space-y-1 pt-1">
+                        <div className="flex justify-between text-[11px] font-mono text-slate-500 font-bold">
+                          <span>Vérifiés au portique</span>
+                          <span className="text-emerald-800 font-black">
+                            {b.scannedCount} / {b.quantity} ({scanPercent}%)
+                          </span>
+                        </div>
+                        <div className="h-2.5 w-full rounded-full bg-slate-100 overflow-hidden border border-slate-200">
+                          <div
+                            className="h-full rounded-full transition-all bg-emerald-600"
+                            style={{ width: `${scanPercent}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Financial info */}
+                      <div className="rounded-xl border border-purple-200 bg-purple-50/50 p-2.5 flex items-center justify-between text-xs font-mono">
+                        <div>
+                          <span className="text-[10px] font-sans text-slate-500 uppercase">Tarif unitaire :</span>{' '}
+                          <strong className="text-slate-900">{b.unitPriceUSD} $</strong>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[10px] font-sans text-slate-500 uppercase">Valeur totale :</span>{' '}
+                          <strong className="text-purple-900 text-sm">
+                            {formatMoney(b.totalValueUSD, displayCurrency, settings.rates)}
+                          </strong>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="border-t-2 border-purple-100 bg-slate-50/70 p-4 space-y-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setInspectingBatch(b);
+                            setBatchModalMode('view');
+                            setIsBatchModalOpen(true);
+                          }}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-xl border-2 border-slate-300 bg-white py-2 px-3 text-xs font-bold text-slate-800 hover:border-slate-800 hover:bg-slate-100 transition-colors shadow-2xs"
+                        >
+                          <Eye className="h-3.5 w-3.5 text-slate-600" />
+                          <span>Voir Billets ({matchingPasses.length})</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPrintingBatch(b);
+                            setIsPrintBatchModalOpen(true);
+                          }}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-xl border-2 border-sky-400 bg-sky-600 py-2 px-3 text-xs font-bold text-white hover:bg-sky-700 transition-colors shadow-2xs"
+                        >
+                          <Printer className="h-3.5 w-3.5" />
+                          <span>Imprimer Planche</span>
+                        </button>
+                      </div>
+
+                      {nextPassToScan && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setScanInput(nextPassToScan.passCode);
+                            setSubTab('scanner');
+                            triggerScanVerification(nextPassToScan.passCode);
+                          }}
+                          className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl border-2 border-purple-600 bg-purple-700 py-2 px-3 text-xs font-bold text-white hover:bg-purple-800 transition-colors shadow-2xs"
+                        >
+                          <ScanLine className="h-3.5 w-3.5" />
+                          <span>⚡ Tester Scan Billet #{nextPassToScan.rangeIndex} ({nextPassToScan.passCode})</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+        </div>
+      )}
+
+      {/* SUBTAB 3: SCANNER & CHECK-IN (CAMERA / OFFLINE STADIUM APP) */}
       {subTab === 'scanner' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Left Column: Camera Viewfinder & Sound Flash */}
@@ -1072,7 +1508,7 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
               {/* Quick test buttons */}
               <div className="pt-1 flex flex-wrap items-center gap-2 text-xs">
                 <span className="text-[11px] font-bold text-slate-500">Test rapide :</span>
-                {passes.slice(0, 4).map((p) => (
+                {passes.slice(0, 3).map((p) => (
                   <button
                     key={p.id}
                     type="button"
@@ -1091,6 +1527,27 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                     {p.passCode} ({p.status})
                   </button>
                 ))}
+                {/* Specific batch ticket test buttons */}
+                {passes
+                  .filter((p) => p.isBatchTicket)
+                  .slice(0, 3)
+                  .map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => {
+                        setScanInput(p.passCode);
+                        triggerScanVerification(p.passCode);
+                      }}
+                      className={`rounded-lg border-2 px-2.5 py-1 text-[11px] font-mono font-bold transition-colors ${
+                        p.status === 'used'
+                          ? 'border-purple-300 bg-purple-50 text-purple-700 hover:bg-purple-100'
+                          : 'border-purple-500 bg-purple-100 text-purple-950 hover:bg-purple-200 shadow-2xs'
+                      }`}
+                    >
+                      🏷️ {p.passCode} (#{p.rangeIndex} - {p.status === 'used' ? 'Émargé' : 'Prêt'})
+                    </button>
+                  ))}
               </div>
             </div>
           </div>
@@ -1164,6 +1621,28 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                   {/* Attendee Details & Avatar Card */}
                   {scanResult.pass && (
                     <div className="rounded-2xl border-2 border-sky-200 bg-sky-50/50 p-4 space-y-3">
+                      {/* Batch recognition highlight if batch ticket */}
+                      {scanResult.pass.isBatchTicket && (
+                        <div className="rounded-xl border-2 border-purple-300 bg-purple-100/80 p-3 space-y-1 text-purple-950 font-sans shadow-2xs">
+                          <div className="flex items-center gap-1.5 text-xs font-black uppercase text-purple-900">
+                            <Layers className="h-4 w-4 text-purple-700 shrink-0" />
+                            <span>🏷️ Billet Issu d&apos;une Plage Organisateur (Lot Guichet)</span>
+                          </div>
+                          <div className="text-xs font-semibold">
+                            Lot : <strong className="font-bold">{scanResult.pass.batchName || scanResult.pass.batchNumber}</strong>
+                          </div>
+                          <div className="flex flex-wrap items-center justify-between text-[11px] font-mono text-purple-800">
+                            <span>Série : <strong>N° {scanResult.pass.rangeIndex} sur {scanResult.pass.rangeTotal}</strong></span>
+                            {scanResult.pass.distributorName && (
+                              <span>Point : <strong>{scanResult.pass.distributorName}</strong></span>
+                            )}
+                          </div>
+                          <div className="pt-0.5 text-[10px] text-purple-700 font-medium">
+                            ✓ Comptabilisé Vendu dès son émission & Contrôlé conforme au Portique
+                          </div>
+                        </div>
+                      )}
+
                       <div className="flex items-center gap-3">
                         <img
                           src={
@@ -1293,6 +1772,7 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                 className="w-full rounded-xl border-2 border-sky-200 bg-white px-3 py-2 text-xs font-bold text-slate-800 focus:border-rose-600 focus:outline-none"
               >
                 <option value="all">Tous les statuts</option>
+                <option value="batch">🏷️ Billets de Plages (Lots Guichet)</option>
                 <option value="valid">Valides (Non émargés)</option>
                 <option value="used">Déjà Utilisés (Émargés)</option>
                 <option value="blacklisted">Blacklistés (Fraude)</option>
@@ -1319,6 +1799,11 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                     <tr key={p.id} className="hover:bg-sky-50/50 transition-colors">
                       <td className="p-3">
                         <div className="font-mono font-bold text-rose-800">{p.passCode}</div>
+                        {p.isBatchTicket && (
+                          <span className="inline-block mt-0.5 rounded-md border border-purple-300 bg-purple-50 px-1.5 py-0.2 text-[9px] font-bold text-purple-900 font-sans">
+                            Lot: #{p.rangeIndex} ({p.batchNumber})
+                          </span>
+                        )}
                         <div className="text-[10px] font-mono text-slate-400 truncate max-w-[130px]">
                           {p.qrSignature}
                         </div>
@@ -2296,6 +2781,51 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* TICKET BATCH MODAL (CREATE / VIEW) */}
+      <TicketBatchModal
+        isOpen={isBatchModalOpen}
+        onClose={() => {
+          setIsBatchModalOpen(false);
+          setInspectingBatch(null);
+        }}
+        mode={batchModalMode}
+        events={events}
+        selectedEventId={batchModalEventId}
+        inspectingBatch={inspectingBatch}
+        batchPasses={inspectingBatch ? passes.filter((p) => p.batchId === inspectingBatch.id) : []}
+        displayCurrency={displayCurrency}
+        settings={settings}
+        currentUserSession={currentUserSession}
+        onGenerateBatch={(payload) => {
+          if (onGenerateBatch) {
+            return onGenerateBatch(payload);
+          }
+          throw new Error('Action de génération non disponible.');
+        }}
+        onPrintBatch={(b) => {
+          setPrintingBatch(b);
+          setIsPrintBatchModalOpen(true);
+        }}
+        onTestScanPass={(passCode) => {
+          setScanInput(passCode);
+          setSubTab('scanner');
+          triggerScanVerification(passCode);
+        }}
+      />
+
+      {/* TICKET BATCH PRINT MODAL */}
+      <TicketBatchPrintModal
+        isOpen={isPrintBatchModalOpen}
+        onClose={() => {
+          setIsPrintBatchModalOpen(false);
+          setPrintingBatch(null);
+        }}
+        batch={printingBatch}
+        passes={printingBatch ? passes.filter((p) => p.batchId === printingBatch.id) : []}
+        displayCurrency={displayCurrency}
+        settings={settings}
+      />
     </div>
   );
 };
