@@ -26,6 +26,11 @@ jobs:
           for i in $(seq 1 20); do curl -fs http://localhost:3100/api/health && break; sleep 0.5; done
           BASE_URL=http://localhost:3100 SETUP_CODE=code-ci node server/tests/api.test.mjs
           curl -fsS http://localhost:3100/ | grep -q '<div id="root">'
+      - name: Contrat de l'application Android (base vierge)
+        run: |
+          NODE_ENV=production SETUP_CODE=code-and PORT=3101 DATA_DIR=/tmp/kp-and node server/index.mjs &
+          for i in $(seq 1 20); do curl -fs http://localhost:3101/api/health && break; sleep 0.5; done
+          BASE_URL=http://localhost:3101 SETUP_CODE=code-and node server/tests/android.test.mjs
 
   docker:
     runs-on: ubuntu-latest

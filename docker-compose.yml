@@ -1,4 +1,5 @@
 # KolaPass — déploiement (Synology Container Manager, ou tout serveur avec Docker).
+# Serveur Linux avec HTTPS automatique : voir deploy/docker-compose.https.yml et docs/DEPLOIEMENT.md.
 # 1. Remplacez SETUP_CODE par un code secret à vous.
 # 2. Lancez : docker compose up -d --build
 # 3. Ouvrez http://IP-DU-SERVEUR:3000 et créez le compte administrateur avec ce code.
@@ -13,5 +14,6 @@ services:
     environment:
       SETUP_CODE: "CHANGEZ_MOI"      # code demandé une seule fois, à la création du compte administrateur
       COOKIE_SECURE: "false"         # mettre "true" si le site est servi en HTTPS (reverse proxy)
+      TRUST_PROXY: "false"           # mettre "true" derrière le proxy inversé du Synology
     volumes:
       - ./data:/data                 # fichier de données + copies de sécurité quotidiennes
