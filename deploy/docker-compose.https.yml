@@ -1,0 +1,43 @@
+# KolaPass derrière Caddy (HTTPS automatique Let's Encrypt) — serveur Linux / VPS.
+#
+# Prérequis : un nom de domaine (ex. billets.mondomaine.cd) qui pointe vers l'IP publique
+# du serveur, ports 80 et 443 ouverts.
+#
+#   cd deploy
+#   cp .env.example .env      # puis éditez DOMAINE, SETUP_CODE, EMAIL
+#   docker compose -f docker-compose.https.yml up -d --build
+services:
+  kolapass:
+    build: ..
+    image: kolapass:latest
+    container_name: kolapass
+    restart: unless-stopped
+    environment:
+      SETUP_CODE: ${SETUP_CODE:?Définissez SETUP_CODE dans deploy/.env}
+      COOKIE_SECURE: "true"
+      TRUST_PROXY: "true"
+    volumes:
+      - ./data:/data
+    expose:
+      - "3000"
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: kolapass-caddy
+    restart: unless-stopped
+    depends_on:
+      - kolapass
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAINE: ${DOMAINE:?Définissez DOMAINE dans deploy/.env}
+      EMAIL: ${EMAIL:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

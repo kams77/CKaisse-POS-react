@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.KolaPass" parent="Theme.Material3.Light.NoActionBar">
+        <item name="colorPrimary">@color/rose</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorSecondary">@color/slate</item>
+        <item name="android:statusBarColor">@color/slate</item>
+        <item name="android:windowBackground">@color/slate_light</item>
+    </style>
+</resources>

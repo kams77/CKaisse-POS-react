@@ -65,6 +65,18 @@ Cochez chaque ligne et notez tout écart dans le tableau de la section 3.
 - [ ] Ne rechargez pas la page tant que le réseau est coupé : l'application a besoin du serveur pour s'ouvrir. Si cela arrive, rien n'est perdu : la file des scans hors-ligne réapparaît dès que le serveur répond.
 - [ ] Rétablir le réseau → **Synchroniser maintenant**. Le serveur rejoue les scans, et un billet déjà entré à une autre porte apparaît comme doublon dans le journal.
 
+### E bis. Application Android « KolaPass Scan » (agents)
+Installation : voir [DEPLOIEMENT.md, section 6](DEPLOIEMENT.md#6-application-android-kolapass-scan-agents).
+- [ ] Première connexion avec le mot de passe provisoire → l'appli demande d'en choisir un nouveau.
+- [ ] Le nom de l'organisation, les événements et les portes s'affichent.
+- [ ] Scanner un billet vendu → écran **vert « ENTRÉE OK »**, avec un bip.
+- [ ] Le rescanner (même téléphone, ou sur le site web) → écran **orange « DÉJÀ ENTRÉ »**, avec l'heure.
+- [ ] Taper un code inventé avec « Saisir un code » → écran **rouge**.
+- [ ] Ouvrir un lien de billet envoyé par WhatsApp sur un autre téléphone, puis scanner le QR affiché → **vert**.
+- [ ] Mode avion après une synchronisation : scanner un billet valide → vert « hors ligne », et la ligne d'état affiche « 1 en attente d'envoi ».
+- [ ] Remettre le réseau → la file se vide toute seule, et le journal des scans sur le site montre l'entrée.
+- [ ] L'organisateur **clôture** l'événement → ses billets sont refusés et l'événement disparaît de la liste de l'appli.
+
 ### F. Reversement et sauvegarde
 - [ ] L'organisateur demande un reversement **supérieur** à son solde → refusé.
 - [ ] Il demande un reversement possible → statut « En attente de l'administrateur ».

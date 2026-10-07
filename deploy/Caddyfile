@@ -1,0 +1,8 @@
+{
+	email {$EMAIL}
+}
+
+{$DOMAINE} {
+	encode gzip
+	reverse_proxy kolapass:3000
+}

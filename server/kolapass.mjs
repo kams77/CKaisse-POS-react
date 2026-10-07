@@ -350,6 +350,11 @@ export function scan(db, u, body, opts = {}) {
     log('invalid_unknown', 'Signature du QR invalide : billet falsifié', pass);
     return { outcome: 'not_found' };
   }
+  const passEvent = db.events.find(e => e.id === pass.eventId);
+  if (passEvent && passEvent.status === 'completed') {
+    log('invalid_unknown', `Événement clôturé (${pass.eventTitle})`, pass);
+    return { outcome: 'not_found', pass, eventClosed: true };
+  }
   if (restrictEvent && pass.eventId !== restrictEvent) {
     log('invalid_unknown', `Billet d'un autre événement (${pass.eventTitle})`, pass);
     return { outcome: 'not_found', pass, wrongEvent: true };

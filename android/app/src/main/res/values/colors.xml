@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="rose">#BE123C</color>
+    <color name="rose_dark">#9F1239</color>
+    <color name="slate">#0F172A</color>
+    <color name="slate_light">#F1F5F9</color>
+    <color name="sky">#E0F2FE</color>
+    <color name="ok">#047857</color>
+    <color name="ko">#B91C1C</color>
+    <color name="warn">#B45309</color>
+    <color name="white">#FFFFFF</color>
+</resources>

@@ -6,6 +6,7 @@
 //   SETUP_CODE  code demandé à la création du compte administrateur (sinon : code aléatoire affiché au démarrage)
 //   NODE_ENV=production ou option --production : sert l'application compilée (dist/) ; sinon mode développement (Vite)
 //   COOKIE_SECURE=true  si le site est servi en HTTPS (reverse proxy du Synology)
+//   TRUST_PROXY=true    si un reverse proxy (Caddy, Synology, Nginx) est devant le serveur
 import http from 'node:http';
 import path from 'node:path';
 import { createApp, randomSetupCode } from './app.mjs';
@@ -38,6 +39,7 @@ const handler = createApp({
   setupCode,
   distDir: PROD ? path.resolve(process.env.DIST_DIR || 'dist') : null,
   secureCookies: process.env.COOKIE_SECURE === 'true',
+  trustProxy: process.env.TRUST_PROXY === 'true',
   devMiddleware,
 });
 
