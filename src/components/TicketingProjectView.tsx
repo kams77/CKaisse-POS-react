@@ -158,6 +158,8 @@ interface TicketingProjectViewProps {
   onBlacklistPass?: (passId: string, reason: string) => void;
   onReactivatePass?: (passId: string) => void;
   onSyncOfflineScans?: (scans: OfflineScanItem[]) => void | Promise<void>;
+  /** Clôture / réouverture d'un événement (organisateur propriétaire ou administrateur). */
+  onSetEventStatus?: (eventId: string, status: 'upcoming' | 'completed') => void;
   /** Ouvre le menu du compte connecté (remplace l'ancienne fenêtre de changement de rôle). */
   onOpenAccount?: () => void;
   /** Codes promo actifs définis par l'administrateur (vérifiés aussi par le serveur). */
@@ -236,6 +238,7 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
   onReactivatePass,
   onSyncOfflineScans,
   onOpenAccount,
+  onSetEventStatus,
   promoCodes = [],
   maxDiscountPercent = 0,
   gates: configuredGates = ['Entrée principale'],
@@ -1103,6 +1106,20 @@ export const TicketingProjectView: React.FC<TicketingProjectViewProps> = ({
                         </div>
                       ))}
                     </div>
+                    {canManage && onSetEventStatus && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const closing = ev.status !== 'completed';
+                          if (window.confirm(closing ? `Clôturer « ${ev.title} » ? La vente sera fermée et l'événement n'apparaîtra plus aux portiques.` : `Rouvrir « ${ev.title} » ?`)) {
+                            onSetEventStatus(ev.id, closing ? 'completed' : 'upcoming');
+                          }
+                        }}
+                        className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-100"
+                      >
+                        {ev.status === 'completed' ? 'Rouvrir l\'événement' : 'Clôturer l\'événement'}
+                      </button>
+                    )}
                   </div>
 
                   {/* Card Bottom CTA */}

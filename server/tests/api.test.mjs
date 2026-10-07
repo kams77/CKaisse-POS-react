@@ -148,6 +148,17 @@ r = await agent('POST', '/api/scan/sync', { scans: [
 ] });
 ok(r.status === 200 && r.json.result.results[0].outcome === 'valid_entry' && r.json.result.results[1].outcome === 'fraud_duplicate', 'synchronisation hors-ligne : 1re entrée valide, 2e doublon');
 
+// Lien public du billet
+const sig0 = sold[0].qrSignature.replace('HMAC-SHA256:', '');
+r = await client()('GET', `/api/public/ticket?c=${sold[0].passCode}&s=${sig0}`);
+ok(r.status === 200 && r.json.holderName.startsWith('Client A') && r.json.status === 'used' && !('holderPhone' in r.json), 'lien public du billet (sans téléphone)');
+r = await client()('GET', `/api/public/ticket?c=${sold[0].passCode}&s=${'0'.repeat(32)}`);
+ok(r.status === 404, 'lien public refusé sans la bonne signature');
+
+// Réponse de scan pour un agent : sans téléphone ni montant
+r = await agent('POST', '/api/scan', { code: sold[1].passCode });
+ok(r.json.result.outcome === 'valid_entry' && r.json.result.pass.holderPhone === '' && r.json.result.pass.pricePaidUSD === 0, 'scan agent : réponse sans téléphone ni montant');
+
 // Vue agent
 r = await agent('GET', '/api/state');
 ok(r.json.passes.length === 5 && r.json.passes.every(p => !p.holderPhone && p.pricePaidUSD === 0) && r.json.payouts.length === 0, 'agent : billets sans téléphone ni montants');
@@ -184,6 +195,18 @@ r = await admin('GET', '/api/backup');
 ok(r.status === 200 && r.json.schema === 1 && !('sessions' in r.json), 'sauvegarde téléchargeable (sans sessions)');
 r = await orga('GET', '/api/backup');
 ok(r.status === 403, 'sauvegarde réservée à l\'administrateur');
+
+// Clôture d'un événement
+r = await agent('PATCH', `/api/events/${ev.id}`, { status: 'completed' });
+ok(r.status === 403, 'agent : ne clôture pas un événement');
+r = await orga('PATCH', `/api/events/${ev.id}`, { status: 'completed' });
+ok(r.status === 200 && r.json.result.status === 'completed', 'organisateur : clôture son événement');
+r = await admin('POST', '/api/scan', { code: batchPasses[2].passCode });
+ok(r.json.result.outcome === 'not_found' && r.json.result.eventClosed, 'événement clôturé : entrée refusée');
+r = await orga('POST', '/api/passes/sell', { eventId: ev.id, tierName: 'Standard', holderName: 'Tard' });
+ok(r.status === 400, 'événement clôturé : vente fermée');
+r = await agent('GET', '/api/state');
+ok(r.json.events.length === 0, 'événement clôturé : retiré des portiques');
 
 r = await admin('GET', '/api/state');
 ok(r.json.logs.length >= 7 && r.json.audit.length > 5, 'journal des scans et journal d\'administration remplis');

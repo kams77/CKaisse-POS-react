@@ -56,32 +56,45 @@ export const TicketPassDetailModal: React.FC<TicketPassDetailModalProps> = ({
   const isBlacklisted = pass.status === 'blacklisted';
   const isUsed = pass.status === 'used';
 
-  const handleSendWhatsApp = () => {
-    const text = encodeURIComponent(
-      `🎟️ *Votre Billet Officiel KolaPass*\n\n` +
-      `*Événement* : ${pass.eventTitle}\n` +
-      `*Pass* : ${pass.tierName} (${pass.passCode})\n` +
-      `*Titulaire* : ${pass.holderName}\n` +
-      `*Lieu* : ${pass.venue}\n` +
-      `*Statut* : ${pass.status === 'valid' ? 'VALIDE (Non utilisé)' : pass.status}\n\n` +
-      `Présentez ce billet (code ${pass.passCode}) à l'entrée : une seule entrée possible.\n` +
-      `Signature cryptographique : ${pass.qrSignature || 'HMAC-SHA256'}\n\n` +
-      `_KolaPass Billetterie & Contrôle d'Accès Sécurisé_`
-    );
-    const cleanPhone = pass.holderPhone.replace(/[^0-9]/g, '');
-    window.open(`https://wa.me/${cleanPhone}?text=${text}`, '_blank');
-    setNotificationStatus('Message WhatsApp préparé avec succès !');
+  // Lien public vers le billet (page avec le QR), vérifié par sa signature.
+  const ticketLink = () => {
+    const sig = (pass.qrSignature || '').replace(/^HMAC-SHA256:/, '');
+    return `${window.location.origin}/billet?c=${encodeURIComponent(pass.passCode)}&s=${sig}`;
+  };
+  const ticketMessage = () =>
+    `Votre billet ${pass.tierName} — ${pass.eventTitle}\n` +
+    `Titulaire : ${pass.holderName}\n` +
+    `Lieu : ${pass.venue} — ${formatDateTime(pass.eventDate)}\n\n` +
+    `Votre QR code (à présenter à l'entrée, une seule entrée possible) :\n${ticketLink()}\n\n` +
+    `Code du billet : ${pass.passCode}`;
+  const flash = (msg: string) => {
+    setNotificationStatus(msg);
     setTimeout(() => setNotificationStatus(null), 3500);
+  };
+
+  const handleSendWhatsApp = () => {
+    const cleanPhone = pass.holderPhone.replace(/[^0-9]/g, '');
+    window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(ticketMessage())}`, '_blank', 'noopener');
+    flash('WhatsApp ouvert : vérifiez puis envoyez le message.');
   };
 
   const handleSendEmailPdf = () => {
-    setNotificationStatus(`E-mail avec billet PDF signé transmis à ${pass.holderEmail || pass.holderName} !`);
-    setTimeout(() => setNotificationStatus(null), 3500);
+    window.location.href = `mailto:${pass.holderEmail || ''}?subject=${encodeURIComponent(`Votre billet — ${pass.eventTitle}`)}&body=${encodeURIComponent(ticketMessage())}`;
+    flash('Messagerie ouverte avec le lien du billet.');
   };
 
   const handleSendSms = () => {
-    setNotificationStatus(`SMS de confirmation expédié au ${pass.holderPhone} avec le code de retrait ${pass.passCode}`);
-    setTimeout(() => setNotificationStatus(null), 3500);
+    window.location.href = `sms:${pass.holderPhone.replace(/[^0-9+]/g, '')}?body=${encodeURIComponent(ticketMessage())}`;
+    flash('Application SMS ouverte avec le lien du billet.');
+  };
+
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(ticketLink());
+      flash('Lien du billet copié.');
+    } catch {
+      flash(ticketLink());
+    }
   };
 
   const handleExecuteBlacklist = () => {
@@ -431,7 +444,7 @@ export const TicketPassDetailModal: React.FC<TicketPassDetailModalProps> = ({
               className="inline-flex items-center gap-1.5 rounded-xl border border-sky-300 bg-sky-50 px-3.5 py-2 text-xs font-bold text-sky-900 hover:bg-sky-100 transition-colors"
             >
               <Mail className="h-4 w-4 text-sky-700" />
-              <span>Email PDF</span>
+              <span>E-mail</span>
             </button>
 
             <button
@@ -440,7 +453,15 @@ export const TicketPassDetailModal: React.FC<TicketPassDetailModalProps> = ({
               className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
             >
               <Send className="h-3.5 w-3.5 text-slate-500" />
-              <span>SMS Code</span>
+              <span>SMS</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleCopyLink}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              <span>Copier le lien</span>
             </button>
           </div>
 

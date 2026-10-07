@@ -192,6 +192,7 @@ export const KolaPassApp: React.FC = () => {
               refresh(true);
               return r;
             }}
+            onSetEventStatus={(id, status) => { mutate(() => op('PATCH', `/api/events/${id}`, { status }), status === 'completed' ? 'Événement clôturé.' : 'Événement rouvert.').catch(() => {}); }}
             onRequestOrganizerPayout={payload => { mutate(() => op('POST', '/api/payouts', payload), 'Demande de reversement envoyée à l\'administrateur.').catch(() => {}); }}
             onBlacklistPass={(id, reason) => { mutate(() => op('POST', `/api/passes/${id}/blacklist`, { reason }), 'Billet bloqué.').catch(() => {}); }}
             onReactivatePass={id => { mutate(() => op('POST', `/api/passes/${id}/reactivate`, {}), 'Billet réactivé.').catch(() => {}); }}

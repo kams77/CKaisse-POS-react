@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
+  verifyPassSignature,
   LOCK_MINUTES, MAX_FAILED_ATTEMPTS, SESSION_IDLE_MS, SESSION_MAX_MS,
   burnTime, hashPassword, hashToken, newToken, passwordProblem, safeEqual, temporaryPassword, verifyPassword,
 } from './auth.mjs';
@@ -114,6 +115,21 @@ export function createApp({ store, setupCode, distDir, secureCookies = false, de
     const m = req.method;
 
     if (p === '/api/health' && m === 'GET') return send(res, 200, { ok: true });
+
+    // Page publique d'un billet (lien envoyé à l'acheteur) : accessible seulement avec la signature.
+    if (p === '/api/public/ticket' && m === 'GET') {
+      const code = String(url.searchParams.get('c') || '').trim().toUpperCase();
+      const sig = String(url.searchParams.get('s') || '').trim().toLowerCase();
+      const db = store.read();
+      const pass = db.passes.find(x => x.passCode === code);
+      if (!pass || !verifyPassSignature(db.secret, pass, sig)) throw new HttpError(404, 'Billet introuvable.');
+      return send(res, 200, {
+        organizationName: db.settings.organizationName || '',
+        passCode: pass.passCode, eventTitle: pass.eventTitle, eventDate: pass.eventDate, venue: pass.venue,
+        tierName: pass.tierName, holderName: pass.holderName, status: pass.status, qrPayload: pass.qrPayload,
+        checkedInAt: pass.checkedInAt || null,
+      });
+    }
 
     if (p === '/api/public/status' && m === 'GET') {
       const db = store.read();
@@ -293,7 +309,8 @@ export function createApp({ store, setupCode, distDir, secureCookies = false, de
       if (match && m === method) {
         const { user } = await requireUser(req);
         const body = await readBody(req);
-        const result = await store.write(d => fn(d, d.users.find(x => x.id === user.id), body, match[1]));
+        let result = await store.write(d => fn(d, d.users.find(x => x.id === user.id), body, match[1]));
+        if (user.role === 'agent') result = redactForAgent(result);
         return send(res, 200, { result, version: store.read().version });
       }
     }
@@ -352,6 +369,15 @@ export function createApp({ store, setupCode, distDir, secureCookies = false, de
     if (devMiddleware) return devMiddleware(req, res, () => { res.writeHead(404); res.end(); });
     serveStatic(req, res, url);
   };
+}
+
+/** L'agent de contrôle ne reçoit ni téléphone ni montants, même dans la réponse d'un scan. */
+function redactForAgent(result) {
+  const strip = p => (p && typeof p === 'object' && p.passCode
+    ? { ...p, holderPhone: '', pricePaidUSD: 0, platformFeeUSD: 0, netOrganizerUSD: 0, transactionReference: undefined }
+    : p);
+  if (result && result.pass) return { ...result, pass: strip(result.pass) };
+  return result;
 }
 
 export const randomSetupCode = () => crypto.randomBytes(9).toString('base64url');
