@@ -30,7 +30,7 @@ const MIME = {
   '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json',
 };
 
-export function createApp({ store, setupCode, distDir, secureCookies = false, devMiddleware = null }) {
+export function createApp({ store, setupCode, distDir, secureCookies = false, trustProxy = false, devMiddleware = null }) {
   // Tentatives de connexion par adresse IP (limite anti-force brute).
   const ipAttempts = new Map();
 
@@ -63,7 +63,12 @@ export function createApp({ store, setupCode, distDir, secureCookies = false, de
   };
   const setCookie = token => `${COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_MAX_MS / 1000}${secureCookies ? '; Secure' : ''}`;
   const clearCookie = () => `${COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secureCookies ? '; Secure' : ''}`;
-  const clientIp = req => String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+  // Derrière un reverse proxy (TRUST_PROXY=true), l'adresse réelle est la dernière ajoutée à
+  // X-Forwarded-For par le proxy ; sinon l'en-tête est ignoré (falsifiable par le client).
+  const clientIp = req => {
+    const xff = trustProxy ? String(req.headers['x-forwarded-for'] || '').split(',').map(x => x.trim()).filter(Boolean) : [];
+    return xff.length ? xff[xff.length - 1] : String(req.socket.remoteAddress || '');
+  };
 
   /** Session valide → utilisateur ; sinon null. */
   async function sessionUser(req) {
