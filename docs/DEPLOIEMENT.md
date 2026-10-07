@@ -51,7 +51,7 @@ Côté matériel :
 ### A. PC Windows ou Linux (réseau local)
 
 1. Installez **Node.js 20 ou plus récent** (<https://nodejs.org>, version LTS).
-2. Récupérez le projet : `git clone https://github.com/kams77/CKaisse-POS-react.git`. Vous pouvez aussi télécharger le ZIP depuis GitHub.
+2. Récupérez le projet : `git clone https://github.com/kams77/KolaPos.git`. Vous pouvez aussi télécharger le ZIP depuis GitHub.
 3. Ouvrez un terminal dans le dossier du projet, puis :
 
    ```bash
@@ -104,7 +104,7 @@ Il faut :
 curl -fsSL https://get.docker.com | sh
 
 # 2. Le projet
-git clone https://github.com/kams77/CKaisse-POS-react.git kolapass
+git clone https://github.com/kams77/KolaPos.git kolapass
 cd kolapass/deploy
 cp .env.example .env
 nano .env            # DOMAINE, EMAIL, SETUP_CODE
@@ -172,7 +172,7 @@ Le site répond sur `https://billets.mondomaine.cd`. Le port 3000 n'est **pas** 
 
 Chaque modification du dossier `android/` déclenche GitHub Actions, qui compile l'application et publie l'APK. Pour la récupérer :
 
-- ouvrez <https://github.com/kams77/CKaisse-POS-react/releases> ;
+- ouvrez <https://github.com/kams77/KolaPos/releases> ;
 - téléchargez le fichier `KolaPassScan-1.0.X.apk` de la version la plus récente.
 
 L'application fonctionne sur **Android 7.0 ou plus récent**. Elle n'a pas besoin de Google Play : le lecteur de QR est intégré.

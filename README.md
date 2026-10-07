@@ -41,7 +41,7 @@ Le dossier `android/` contient l'application native des agents de contrôle (por
 - la saisie manuelle du code et l'usage de la lampe ;
 - le **contrôle hors ligne**, avec synchronisation automatique au retour du réseau.
 
-GitHub Actions compile l'APK à chaque modification et le publie dans les [Releases](https://github.com/kams77/CKaisse-POS-react/releases). Installation et configuration : [docs/DEPLOIEMENT.md](docs/DEPLOIEMENT.md#6-application-android-kolapass-scan-agents).
+GitHub Actions compile l'APK à chaque modification et le publie dans les [Releases](https://github.com/kams77/KolaPos/releases). Installation et configuration : [docs/DEPLOIEMENT.md](docs/DEPLOIEMENT.md#6-application-android-kolapass-scan-agents).
 
 ## Billet envoyé au client
 
